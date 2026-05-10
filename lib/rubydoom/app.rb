@@ -105,7 +105,20 @@ module Rubydoom
       ox = (width  - SCREEN_WIDTH  * s) / 2.0
       oy = (height - SCREEN_HEIGHT * s) / 2.0
       Gosu.translate(ox, oy) { Gosu.scale(s) { render_scene } }
+      draw_fps unless @dump_frame_to
       dump_and_exit if @dump_frame_to
+    end
+
+    # Live FPS in the top-right, drawn outside Gosu.scale so the text
+    # stays crisp regardless of window size. Cached font instance —
+    # Gosu::Font allocation is non-trivial.
+    def draw_fps
+      @fps_font ||= Gosu::Font.new(14)
+      text   = "FPS: #{Gosu.fps}"
+      margin = 6
+      w      = @fps_font.text_width(text)
+      @fps_font.draw_text(text, width - w - margin, margin,
+                          100, 1, 1, Gosu::Color::WHITE)
     end
 
     # Largest uniform scale that fits 320x200 inside the current
