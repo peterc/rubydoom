@@ -50,7 +50,8 @@ module Rubydoom
       @show_automap = show_automap
       @automap_mode = automap_mode
       super(SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale,
-            update_interval: 1000.0 / TIC_RATE)
+            update_interval: 1000.0 / TIC_RATE,
+            resizable: true)
       self.caption = "rubydoom — #{map_name}"
 
       wad      = WAD.open(wad_path)
@@ -81,6 +82,12 @@ module Rubydoom
       # Skip the first frame's mouse delta — cursor starts wherever the OS
       # left it, so the recenter would otherwise cause a sudden yaw jump.
       @mouse_centered = false
+      # Click-to-capture: the window starts with the OS cursor visible
+      # and mouse-look off, so the user can resize / move the window
+      # without first wrestling control of the cursor away. Clicking in
+      # the playfield captures; Esc (or losing focus) releases.
+      @captured       = false
+      @focused        = true
 
       @bob_phase = 0.0
       @bob_amp   = 0.0
@@ -90,12 +97,24 @@ module Rubydoom
     end
 
     def needs_cursor?
-      false
+      !@captured
     end
 
     def draw
-      Gosu.scale(@scale) { render_scene }
+      s  = current_scale
+      ox = (width  - SCREEN_WIDTH  * s) / 2.0
+      oy = (height - SCREEN_HEIGHT * s) / 2.0
+      Gosu.translate(ox, oy) { Gosu.scale(s) { render_scene } }
       dump_and_exit if @dump_frame_to
+    end
+
+    # Largest uniform scale that fits 320x200 inside the current
+    # window. Anything left over becomes black letterbox bars (the
+    # window's default clear colour).
+    def current_scale
+      sx = width.fdiv(SCREEN_WIDTH)
+      sy = height.fdiv(SCREEN_HEIGHT)
+      sx < sy ? sx : sy
     end
 
     def update
@@ -110,15 +129,38 @@ module Rubydoom
       @hud.update_tic(@state)
     end
 
+    def lose_focus
+      @focused  = false
+      @captured = false
+    end
+
+    def gain_focus
+      @focused = true
+    end
+
     def button_down(id)
       case id
-      when Gosu::KB_ESCAPE then close
+      when Gosu::KB_ESCAPE
+        @captured ? release_mouse : close
+      when Gosu::MS_LEFT
+        capture_mouse unless @captured
       when Gosu::KB_TAB    then @show_automap = !@show_automap
       when Gosu::KB_B      then @automap_mode = (@automap_mode == :bsp ? :lines : :bsp)
       when Gosu::KB_SPACE  then @doors.try_use(@player)
       when Gosu::KB_P
         puts "RUBYDOOM_X=#{@player.x} RUBYDOOM_Y=#{@player.y} RUBYDOOM_ANGLE=#{@player.angle}"
       end
+    end
+
+    def capture_mouse
+      @captured       = true
+      # Skip the first delta after capture — cursor was wherever the
+      # user clicked, so the recenter would otherwise cause a yaw jump.
+      @mouse_centered = false
+    end
+
+    def release_mouse
+      @captured = false
     end
 
     private
@@ -138,6 +180,7 @@ module Rubydoom
     # the window. DOOM angle increases counter-clockwise (0=E, 90=N), so
     # rightward mouse movement (positive dx) decreases the angle.
     def handle_mouse_look
+      return unless @captured && @focused
       cx = width  / 2
       cy = height / 2
       unless @mouse_centered
