@@ -70,6 +70,19 @@ module Rubydoom
                          :sil_top1, :sil_top2,
                          :sil_bot1, :sil_bot2)
 
+    # Masked middle texture on a two-sided linedef. DOOM uses these as
+    # transparent fences / grates (e.g. BRNBIGC bar grates in E1M1).
+    # Front and back sectors are usually identical, so there's no
+    # upper/lower step for the regular wall pass to draw — the midtex
+    # is the only visible thing. Rendered after sprites with per-column
+    # depth clipping against @drawsegs.
+    MaskedSeg = Struct.new(:texture, :x1, :x2, :sx1, :span_x,
+                           :inv_z1, :inv_z2, :uoz1, :uoz2,
+                           :x_offset, :y_offset, :tex_top_world,
+                           :portal_top_world, :portal_bot_world,
+                           :light, :contrast,
+                           keyword_init: true)
+
     def initialize(map, bsp, textures: nil, flats: nil, palette: nil,
                    colormap: nil, sky: nil, sprites: nil)
       @map      = map
@@ -105,7 +118,8 @@ module Rubydoom
       top_clip   = Array.new(SCREEN_WIDTH, 0)
       bot_clip   = Array.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT - 1)
       visplanes  = Visplanes.new(SCREEN_WIDTH)
-      @drawsegs  = []
+      @drawsegs    = []
+      @masked_segs = []
       open_columns = SCREEN_WIDTH
 
       @bsp.each_subsector_front_to_back(player.x, player.y) do |ssec_idx|
@@ -121,6 +135,7 @@ module Rubydoom
 
       draw_visplanes(fb, visplanes, eye_y, player, cos_a, sin_a)
       draw_sprites(fb, player, cos_a, sin_a, eye_y)
+      draw_masked_segs(fb, eye_y)
 
       fb.to_gosu_image.draw(0, 0, Z)
     end
@@ -314,6 +329,100 @@ module Rubydoom
       [spr_top, spr_bot]
     end
 
+    # Walks masked segs back-to-front (painter's algorithm). Each column
+    # of each masked seg checks every other drawseg in front and either
+    # rejects the column (solid wall blocks it) or tightens the vertical
+    # range to the back-sector silhouette. Texture columns are read
+    # post-by-post — gaps in the patch show through as transparency.
+    def draw_masked_segs(fb, eye_y)
+      return if @masked_segs.empty?
+      @masked_segs.sort_by! { |ms| ms.inv_z1 + ms.inv_z2 }
+      @masked_segs.each { |ms| draw_masked_seg(fb, ms, eye_y) }
+    end
+
+    def draw_masked_seg(fb, ms, eye_y)
+      texture = ms.texture
+      tex_w   = texture.width
+      tex_h   = texture.height
+      cols    = texture.columns
+
+      x = ms.x1
+      while x <= ms.x2
+        t     = (x - ms.sx1) / ms.span_x
+        inv_z = ms.inv_z1 + (ms.inv_z2 - ms.inv_z1) * t
+        z     = 1.0 / inv_z
+        scale = inv_z * FOCAL_LENGTH
+
+        occluded = false
+        sil_top  = -1
+        sil_bot  = PLAYFIELD_HEIGHT
+        @drawsegs.each do |ds|
+          next if ds.x2 < x || ds.x1 > x
+          ds_span = ds.x2 - ds.x1
+          ds_span = 1 if ds_span == 0
+          ds_t    = (x - ds.x1).to_f / ds_span
+          ds_scale = ds.scale1 + (ds.scale2 - ds.scale1) * ds_t
+          next unless ds_scale > scale
+          if ds.solid
+            occluded = true
+            break
+          end
+          if ds.sil_top1
+            sy = (ds.sil_top1 + (ds.sil_top2 - ds.sil_top1) * ds_t).floor
+            sil_top = sy if sy > sil_top
+          end
+          if ds.sil_bot1
+            sy = (ds.sil_bot1 + (ds.sil_bot2 - ds.sil_bot1) * ds_t).floor
+            sil_bot = sy if sy < sil_bot
+          end
+        end
+        if occluded
+          x += 1
+          next
+        end
+
+        sy_top_screen   = (HALF_HEIGHT - (ms.tex_top_world    - eye_y) * scale).ceil
+        sy_portal_top   = (HALF_HEIGHT - (ms.portal_top_world - eye_y) * scale).ceil
+        sy_portal_bot   = (HALF_HEIGHT - (ms.portal_bot_world - eye_y) * scale).floor
+
+        y_top = sy_top_screen
+        y_top = sy_portal_top if y_top < sy_portal_top
+        y_top = sil_top + 1   if y_top < sil_top + 1
+        y_top = 0             if y_top < 0
+
+        y_bot = sy_top_screen + (tex_h * scale).to_i - 1
+        y_bot = sy_portal_bot if y_bot > sy_portal_bot
+        y_bot = sil_bot - 1   if y_bot > sil_bot - 1
+        y_bot = PLAYFIELD_HEIGHT - 1 if y_bot > PLAYFIELD_HEIGHT - 1
+
+        if y_top <= y_bot
+          u   = (ms.uoz1 + (ms.uoz2 - ms.uoz1) * t) * z + ms.x_offset
+          col = cols[u.floor % tex_w]
+
+          step_v = z / FOCAL_LENGTH
+          v      = (ms.tex_top_world - eye_y) - (HALF_HEIGHT - y_top) * step_v + ms.y_offset
+
+          row = @colormap.row_for(ms.light, ms.contrast, z)
+
+          sy = y_top
+          while sy <= y_bot
+            v_int = v.floor
+            if v_int >= 0 && v_int < tex_h
+              idx = col[v_int]
+              if idx && idx >= 0
+                rgb = @colormap.shaded(row, idx)
+                fb.set_pixel(x, sy, rgb[0], rgb[1], rgb[2])
+              end
+            end
+            v  += step_v
+            sy += 1
+          end
+        end
+
+        x += 1
+      end
+    end
+
     # Builds a DrawSeg from a seg that's about to be rendered.
     # Silhouette endpoints are computed at the integer column boundaries
     # (col_start..col_end) using the same 1/z lerp as the wall sampling,
@@ -449,6 +558,38 @@ module Rubydoom
                      back_ceil_world,  front_ceil_world,
                      back_floor_world, front_floor_world,
                      eye_y)
+
+      if back_sector
+        mid_name = front_sd.middle_texture
+        if mid_name && mid_name != "-" && !mid_name.empty?
+          masked_tex = texture_for(mid_name)
+          if masked_tex
+            portal_top = front_ceil_world  < back_ceil_world  ? front_ceil_world  : back_ceil_world
+            portal_bot = front_floor_world > back_floor_world ? front_floor_world : back_floor_world
+            masked_top_world = linedef.lower_unpegged? ?
+                                 portal_bot + masked_tex.height :
+                                 portal_top
+            @masked_segs << MaskedSeg.new(
+              texture:           masked_tex,
+              x1:                col_start,
+              x2:                col_end,
+              sx1:               sx1,
+              span_x:            span_x,
+              inv_z1:            inv_z1,
+              inv_z2:            inv_z2,
+              uoz1:              uoz1,
+              uoz2:              uoz2,
+              x_offset:          x_offset,
+              y_offset:          y_offset,
+              tex_top_world:     masked_top_world,
+              portal_top_world:  portal_top,
+              portal_bot_world:  portal_bot,
+              light:             light,
+              contrast:          contrast,
+            )
+          end
+        end
+      end
 
       newly_closed = 0
       x = col_start
