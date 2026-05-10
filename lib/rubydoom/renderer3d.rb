@@ -56,19 +56,21 @@ module Rubydoom
 
     Z = -2
 
-    # Per-seg record built during the wall pass so sprites can clip
-    # against any wall in front of them. Mirrors vanilla DOOM's
-    # `drawseg_t`: x1/x2 are the screen column range, scale1/scale2 are
-    # 1/cam_z * FOCAL_LENGTH at those columns (for depth comparison
-    # via lerp). For one-sided walls `solid` is true and silhouette
-    # endpoints are nil. For two-sided segs sil_top1/2 mark the screen
-    # y of the back ceiling (for lintels) and sil_bot1/2 mark the back
-    # floor (for steps); either pair may be nil if that side has no
-    # height change.
+    # Per-seg record built during the wall pass so sprites and masked
+    # midtex can clip against any wall in front of them. Mirrors vanilla
+    # DOOM's `drawseg_t`: x1/x2 are the screen column range, scale1/2
+    # are 1/cam_z * FOCAL_LENGTH at those columns (for depth comparison
+    # via lerp). For one-sided walls `solid` is true and clip endpoints
+    # are nil. For two-sided segs clip_top1/2 and clip_bot1/2 mark the
+    # screen y of the PORTAL OPENING: clip_top = lower of (front_ceil,
+    # back_ceil), clip_bot = higher of (front_floor, back_floor). Anything
+    # outside this y range at the seg's columns is occluded by the front
+    # sector's floor / ceiling visplane (visible across the gap) or by
+    # the back-sector step wall.
     DrawSeg = Struct.new(:x1, :x2, :scale1, :scale2,
                          :solid,
-                         :sil_top1, :sil_top2,
-                         :sil_bot1, :sil_bot2)
+                         :clip_top1, :clip_top2,
+                         :clip_bot1, :clip_bot2)
 
     # Masked middle texture on a two-sided linedef. DOOM uses these as
     # transparent fences / grates (e.g. BRNBIGC bar grates in E1M1).
@@ -81,6 +83,9 @@ module Rubydoom
                            :x_offset, :y_offset, :tex_top_world,
                            :portal_top_world, :portal_bot_world,
                            :light, :contrast,
+                           keyword_init: true)
+
+    VisSprite = Struct.new(:cam_z, :cam_x, :pic, :mirrored, :thing,
                            keyword_init: true)
 
     def initialize(map, bsp, textures: nil, flats: nil, palette: nil,
@@ -134,8 +139,7 @@ module Rubydoom
       end
 
       draw_visplanes(fb, visplanes, eye_y, player, cos_a, sin_a)
-      draw_sprites(fb, player, cos_a, sin_a, eye_y)
-      draw_masked_segs(fb, eye_y)
+      draw_masked(fb, player, cos_a, sin_a, eye_y)
 
       fb.to_gosu_image.draw(0, 0, Z)
     end
@@ -156,20 +160,37 @@ module Rubydoom
       @map.sectors[@map.sidedefs[sd_idx].sector_index]
     end
 
-    # Stage-4 sprite billboards. For each thing in the THINGS lump:
-    # transform its (x,y) into camera space, cull anything behind the
-    # near plane, pick a rotation lump (or the rot-0 single-view lump
-    # for items / decorations), and draw the sprite as a screen-space
-    # rectangle column-by-column. Sorted back-to-front so closer
-    # sprites paint over farther ones.
-    #
-    # NOTE: deliberately no wall-clipping yet — sprites will visibly
-    # punch through any wall whose distance is between the player and
-    # the sprite. That's stage 5.
-    def draw_sprites(fb, player, cos_a, sin_a, eye_y)
-      return unless @sprites
+    # Masked pass: sprites (billboards) and masked midtex (transparent
+    # fences) drawn in a single back-to-front order so a sprite in
+    # front of a grate correctly paints over the grate, and vice
+    # versa. Per-column wall clipping against @drawsegs happens inside
+    # each item's draw routine; that handles wall occlusion. The sort
+    # here just resolves overlap between the masked items themselves.
+    def draw_masked(fb, player, cos_a, sin_a, eye_y)
+      vissprites = gather_vissprites(player, cos_a, sin_a)
+      return if vissprites.empty? && @masked_segs.empty?
 
-      visible = []
+      items = []
+      vissprites.each { |vs| items << [vs.cam_z, :sprite, vs] }
+      @masked_segs.each do |ms|
+        avg_cam_z = 0.5 * (1.0 / ms.inv_z1 + 1.0 / ms.inv_z2)
+        items << [avg_cam_z, :masked, ms]
+      end
+
+      items.sort_by! { |it| -it[0] }
+      items.each do |_, kind, payload|
+        if kind == :sprite
+          draw_billboard(fb, payload.pic, payload.mirrored,
+                         payload.cam_x, payload.cam_z, payload.thing, eye_y)
+        else
+          draw_masked_seg(fb, payload, eye_y)
+        end
+      end
+    end
+
+    def gather_vissprites(player, cos_a, sin_a)
+      return [] unless @sprites
+      out = []
       @map.things.each do |thing|
         info = ThingTypes[thing.type]
         next unless info
@@ -185,13 +206,10 @@ module Rubydoom
         pic, mirrored = pick_rotation(frame, thing, dx, dy)
         next unless pic
 
-        visible << [cam_z, cam_x, pic, mirrored, thing]
+        out << VisSprite.new(cam_z: cam_z, cam_x: cam_x,
+                             pic: pic, mirrored: mirrored, thing: thing)
       end
-
-      visible.sort_by! { |item| -item[0] }
-      visible.each do |cam_z, cam_x, pic, mirrored, thing|
-        draw_billboard(fb, pic, mirrored, cam_x, cam_z, thing, eye_y)
-      end
+      out
     end
 
     # Vanilla R_ProjectSprite logic. ang = angle from camera to thing.
@@ -312,14 +330,10 @@ module Rubydoom
               spr_top[i] = PLAYFIELD_HEIGHT
               spr_bot[i] = -1
             else
-              if ds.sil_top1
-                sy = (ds.sil_top1 + (ds.sil_top2 - ds.sil_top1) * t).floor
-                spr_top[i] = sy if sy > spr_top[i]
-              end
-              if ds.sil_bot1
-                sy = (ds.sil_bot1 + (ds.sil_bot2 - ds.sil_bot1) * t).floor
-                spr_bot[i] = sy if sy < spr_bot[i]
-              end
+              sy_t = (ds.clip_top1 + (ds.clip_top2 - ds.clip_top1) * t).floor
+              spr_top[i] = sy_t if sy_t > spr_top[i]
+              sy_b = (ds.clip_bot1 + (ds.clip_bot2 - ds.clip_bot1) * t).floor
+              spr_bot[i] = sy_b if sy_b < spr_bot[i]
             end
           end
           x += 1
@@ -329,17 +343,9 @@ module Rubydoom
       [spr_top, spr_bot]
     end
 
-    # Walks masked segs back-to-front (painter's algorithm). Each column
-    # of each masked seg checks every other drawseg in front and either
-    # rejects the column (solid wall blocks it) or tightens the vertical
-    # range to the back-sector silhouette. Texture columns are read
-    # post-by-post — gaps in the patch show through as transparency.
-    def draw_masked_segs(fb, eye_y)
-      return if @masked_segs.empty?
-      @masked_segs.sort_by! { |ms| ms.inv_z1 + ms.inv_z2 }
-      @masked_segs.each { |ms| draw_masked_seg(fb, ms, eye_y) }
-    end
-
+    # Renders a single masked midtex seg. Per column: depth-clip against
+    # @drawsegs (solid → skip, with silhouette → shrink y range), then
+    # sample the texture column post-by-post so patch gaps show through.
     def draw_masked_seg(fb, ms, eye_y)
       texture = ms.texture
       tex_w   = texture.width
@@ -367,14 +373,10 @@ module Rubydoom
             occluded = true
             break
           end
-          if ds.sil_top1
-            sy = (ds.sil_top1 + (ds.sil_top2 - ds.sil_top1) * ds_t).floor
-            sil_top = sy if sy > sil_top
-          end
-          if ds.sil_bot1
-            sy = (ds.sil_bot1 + (ds.sil_bot2 - ds.sil_bot1) * ds_t).floor
-            sil_bot = sy if sy < sil_bot
-          end
+          sy_t = (ds.clip_top1 + (ds.clip_top2 - ds.clip_top1) * ds_t).floor
+          sil_top = sy_t if sy_t > sil_top
+          sy_b = (ds.clip_bot1 + (ds.clip_bot2 - ds.clip_bot1) * ds_t).floor
+          sil_bot = sy_b if sy_b < sil_bot
         end
         if occluded
           x += 1
@@ -445,20 +447,19 @@ module Rubydoom
         return
       end
 
-      sil_top1 = sil_top2 = nil
-      sil_bot1 = sil_bot2 = nil
-      if back_ceil_world < front_ceil_world
-        rel = back_ceil_world - eye_y
-        sil_top1 = (HALF_HEIGHT - rel * inv_z_x1 * FOCAL_LENGTH).floor
-        sil_top2 = (HALF_HEIGHT - rel * inv_z_x2 * FOCAL_LENGTH).floor
-      end
-      if back_floor_world > front_floor_world
-        rel = back_floor_world - eye_y
-        sil_bot1 = (HALF_HEIGHT - rel * inv_z_x1 * FOCAL_LENGTH).ceil
-        sil_bot2 = (HALF_HEIGHT - rel * inv_z_x2 * FOCAL_LENGTH).ceil
-      end
+      portal_top_world = front_ceil_world  < back_ceil_world  ? front_ceil_world  : back_ceil_world
+      portal_bot_world = front_floor_world > back_floor_world ? front_floor_world : back_floor_world
+
+      rel_top = portal_top_world - eye_y
+      rel_bot = portal_bot_world - eye_y
+
+      clip_top1 = (HALF_HEIGHT - rel_top * inv_z_x1 * FOCAL_LENGTH).floor
+      clip_top2 = (HALF_HEIGHT - rel_top * inv_z_x2 * FOCAL_LENGTH).floor
+      clip_bot1 = (HALF_HEIGHT - rel_bot * inv_z_x1 * FOCAL_LENGTH).ceil
+      clip_bot2 = (HALF_HEIGHT - rel_bot * inv_z_x2 * FOCAL_LENGTH).ceil
+
       @drawsegs << DrawSeg.new(col_start, col_end, scale1, scale2,
-                               false, sil_top1, sil_top2, sil_bot1, sil_bot2)
+                               false, clip_top1, clip_top2, clip_bot1, clip_bot2)
     end
 
     def render_seg(fb, seg, linedef, player, cos_a, sin_a, eye_y, top_clip, bot_clip, visplanes)
