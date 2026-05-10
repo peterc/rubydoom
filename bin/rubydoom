@@ -27,6 +27,7 @@ Rubydoom::App.new(
   wad_path: wad_path,
   map_name: map_name,
   dump_frame_to: ENV["RUBYDOOM_DUMP_FRAME"],
+  show_automap: ENV["RUBYDOOM_AUTOMAP"] == "1",
   automap_mode: (ENV["RUBYDOOM_AUTOMAP_MODE"] || "lines").to_sym,
 ).show
 

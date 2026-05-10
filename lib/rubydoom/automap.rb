@@ -22,8 +22,13 @@ module Rubydoom
     COLOR_LINTEL     = [220, 220, 60].freeze
     COLOR_SAME       = [90,  90,  90].freeze
     COLOR_PLAYER     = [60,  220, 60].freeze
+    COLOR_THING      = [220, 220, 220].freeze
+    COLOR_PSTART     = [60,  220, 60].freeze
+    COLOR_DM_START   = [60,  220, 220].freeze
+    COLOR_TELEPORT   = [180, 100, 220].freeze
 
     PLAYER_MARKER_RADIUS = 5
+    THING_DOT_RADIUS     = 1
 
     def initialize(map, bsp: nil)
       @map = map
@@ -43,6 +48,8 @@ module Rubydoom
       when :bsp   then draw_bsp(fb, project, player)
       else raise ArgumentError, "unknown automap mode: #{mode.inspect}"
       end
+
+      draw_things(fb, project)
 
       px, py = project.call(player.x, player.y)
       draw_player_marker(fb, px, py, player.angle)
@@ -154,6 +161,34 @@ module Rubydoom
         COLOR_LINTEL
       else
         COLOR_SAME
+      end
+    end
+
+    # Plot every thing in the map as a small filled square. Player /
+    # multiplayer / teleport-landing markers get distinct colors so the
+    # standard layout is recognisable; everything else (monsters,
+    # items, decorations) is a uniform white dot for now — categorising
+    # by doomednum belongs in the sprite-info table (step 3).
+    def draw_things(fb, project)
+      @map.things.each do |t|
+        cx, cy = project.call(t.x, t.y)
+        color  = thing_color(t.type)
+        r = THING_DOT_RADIUS
+        ((-r)..r).each do |dy|
+          ((-r)..r).each do |dx|
+            fb.set_pixel((cx + dx).to_i, (cy + dy).to_i, *color)
+          end
+        end
+      end
+    end
+
+    def thing_color(type)
+      case type
+      when 1     then COLOR_PSTART
+      when 2..4  then COLOR_PSTART
+      when 11    then COLOR_DM_START
+      when 14    then COLOR_TELEPORT
+      else            COLOR_THING
       end
     end
 

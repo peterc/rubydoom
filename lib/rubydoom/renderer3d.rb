@@ -56,7 +56,8 @@ module Rubydoom
 
     Z = -2
 
-    def initialize(map, bsp, textures: nil, flats: nil, palette: nil, colormap: nil, sky: nil)
+    def initialize(map, bsp, textures: nil, flats: nil, palette: nil,
+                   colormap: nil, sky: nil, sprites: nil)
       @map      = map
       @bsp      = bsp
       @textures = textures
@@ -64,6 +65,7 @@ module Rubydoom
       @palette  = palette
       @colormap = colormap
       @sky      = sky
+      @sprites  = sprites
     end
 
     def draw(player)
@@ -103,6 +105,7 @@ module Rubydoom
       end
 
       draw_visplanes(fb, visplanes, eye_y, player, cos_a, sin_a)
+      draw_sprites(fb, player, cos_a, sin_a, eye_y)
 
       fb.to_gosu_image.draw(0, 0, Z)
     end
@@ -110,13 +113,131 @@ module Rubydoom
     private
 
     def compute_eye_y(player)
-      ssec_idx = @bsp.subsector_at(player.x, player.y)
+      sector = sector_at(player.x, player.y)
+      sector.floor_height + (player.view_height || EYE_HEIGHT) + (player.bob || 0.0)
+    end
+
+    def sector_at(x, y)
+      ssec_idx = @bsp.subsector_at(x, y)
       ssec     = @map.subsectors[ssec_idx]
       seg      = @map.segs[ssec.first_seg_index]
       ld       = @map.linedefs[seg.linedef_index]
       sd_idx   = seg.direction == 0 ? ld.front_sidedef_index : ld.back_sidedef_index
-      sector   = @map.sectors[@map.sidedefs[sd_idx].sector_index]
-      sector.floor_height + (player.view_height || EYE_HEIGHT) + (player.bob || 0.0)
+      @map.sectors[@map.sidedefs[sd_idx].sector_index]
+    end
+
+    # Stage-4 sprite billboards. For each thing in the THINGS lump:
+    # transform its (x,y) into camera space, cull anything behind the
+    # near plane, pick a rotation lump (or the rot-0 single-view lump
+    # for items / decorations), and draw the sprite as a screen-space
+    # rectangle column-by-column. Sorted back-to-front so closer
+    # sprites paint over farther ones.
+    #
+    # NOTE: deliberately no wall-clipping yet — sprites will visibly
+    # punch through any wall whose distance is between the player and
+    # the sprite. That's stage 5.
+    def draw_sprites(fb, player, cos_a, sin_a, eye_y)
+      return unless @sprites
+
+      visible = []
+      @map.things.each do |thing|
+        info = ThingTypes[thing.type]
+        next unless info
+        frame = @sprites.frame_for(info.sprite, info.frame)
+        next unless frame
+
+        dx = thing.x - player.x
+        dy = thing.y - player.y
+        cam_z =  dx * cos_a + dy * sin_a
+        cam_x =  dx * sin_a - dy * cos_a
+        next if cam_z < NEAR_Z
+
+        pic, mirrored = pick_rotation(frame, thing, dx, dy)
+        next unless pic
+
+        visible << [cam_z, cam_x, pic, mirrored, thing]
+      end
+
+      visible.sort_by! { |item| -item[0] }
+      visible.each do |cam_z, cam_x, pic, mirrored, thing|
+        draw_billboard(fb, pic, mirrored, cam_x, cam_z, thing, eye_y)
+      end
+    end
+
+    # Vanilla R_ProjectSprite logic. ang = angle from camera to thing.
+    # diff = (ang - thing.angle + 22.5°*9) mod 360°, divided by 45° to
+    # quantize into 8 buckets (0..7); +1 to get the rotation digit
+    # used in lump names (1..8). The +202.5° offset is what makes
+    # rotation 1 = "thing facing the camera, we see its front".
+    def pick_rotation(frame, thing, dx, dy)
+      rotations = frame.rotations
+      single    = rotations[0]
+      return single if single
+
+      ang  = Math.atan2(dy, dx) * 180.0 / Math::PI
+      diff = (ang - thing.angle + 202.5) % 360
+      idx  = (diff / 45.0).to_i
+      rotations[1 + idx]
+    end
+
+    def draw_billboard(fb, pic, mirrored, cam_x, cam_z, thing, eye_y)
+      sector  = sector_at(thing.x, thing.y)
+      thing_z = sector.floor_height
+      light   = sector.light_level
+
+      scale     = FOCAL_LENGTH / cam_z
+      inv_scale = cam_z / FOCAL_LENGTH
+
+      sprite_top    = thing_z + pic.top_offset
+      sprite_bottom = sprite_top - pic.height
+      sy_top        = HALF_HEIGHT - (sprite_top    - eye_y) * scale
+      sy_bottom     = HALF_HEIGHT - (sprite_bottom - eye_y) * scale
+
+      cx_screen = HALF_WIDTH + (cam_x / cam_z) * FOCAL_LENGTH
+      sx_left   = cx_screen - pic.left_offset * scale
+      sx_right  = sx_left + pic.width * scale
+
+      x_start = sx_left.ceil
+      x_end   = sx_right.ceil - 1
+      x_start = 0 if x_start < 0
+      x_end   = SCREEN_WIDTH - 1 if x_end >= SCREEN_WIDTH
+      return if x_start > x_end
+
+      y_top_full = sy_top.ceil
+      y_bot_full = sy_bottom.ceil - 1
+      return if y_top_full > PLAYFIELD_HEIGHT - 1 || y_bot_full < 0
+
+      pal_colors = @palette ? @palette.colors : nil
+      shade_row  = @colormap ? @colormap.row_for(light, 0, cam_z) : nil
+      pixels     = pic.pixels
+      pic_w      = pic.width
+      pic_h      = pic.height
+
+      x = x_start
+      while x <= x_end
+        u = ((x - sx_left) * inv_scale).to_i
+        if u >= 0 && u < pic_w
+          uu = mirrored ? (pic_w - 1 - u) : u
+          y  = y_top_full < 0 ? 0 : y_top_full
+          yend = y_bot_full > PLAYFIELD_HEIGHT - 1 ? PLAYFIELD_HEIGHT - 1 : y_bot_full
+          while y <= yend
+            v = ((y - sy_top) * inv_scale).to_i
+            if v >= 0 && v < pic_h
+              idx = pixels[v][uu]
+              if idx && idx >= 0
+                if shade_row
+                  r, g, b = @colormap.shaded(shade_row, idx)
+                else
+                  r, g, b = pal_colors[idx]
+                end
+                fb.set_pixel(x, y, r, g, b)
+              end
+            end
+            y += 1
+          end
+        end
+        x += 1
+      end
     end
 
     def render_seg(fb, seg, linedef, player, cos_a, sin_a, eye_y, top_clip, bot_clip, visplanes)

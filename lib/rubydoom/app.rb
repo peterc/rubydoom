@@ -59,6 +59,7 @@ module Rubydoom
       colormap = Colormap.from_wad(wad, palette)
       graphics = Graphics.new(wad, palette)
       @textures = AnimatedTextures.new(Textures.new(wad, palette, graphics))
+      sprites   = Sprites.new(wad)
       @flats   = AnimatedFlats.new(Flats.new(wad))
       images   = GosuImageCache.new(graphics)
 
@@ -76,7 +77,7 @@ module Rubydoom
       @renderer3d = Renderer3D.new(@map, @bsp,
                                    textures: @textures, flats: @flats,
                                    palette: palette, colormap: colormap,
-                                   sky: sky)
+                                   sky: sky, sprites: sprites)
       @state      = GameState.default
 
       # Skip the first frame's mouse delta — cursor starts wherever the OS
