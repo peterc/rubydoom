@@ -56,6 +56,20 @@ module Rubydoom
 
     Z = -2
 
+    # Per-seg record built during the wall pass so sprites can clip
+    # against any wall in front of them. Mirrors vanilla DOOM's
+    # `drawseg_t`: x1/x2 are the screen column range, scale1/scale2 are
+    # 1/cam_z * FOCAL_LENGTH at those columns (for depth comparison
+    # via lerp). For one-sided walls `solid` is true and silhouette
+    # endpoints are nil. For two-sided segs sil_top1/2 mark the screen
+    # y of the back ceiling (for lintels) and sil_bot1/2 mark the back
+    # floor (for steps); either pair may be nil if that side has no
+    # height change.
+    DrawSeg = Struct.new(:x1, :x2, :scale1, :scale2,
+                         :solid,
+                         :sil_top1, :sil_top2,
+                         :sil_bot1, :sil_bot2)
+
     def initialize(map, bsp, textures: nil, flats: nil, palette: nil,
                    colormap: nil, sky: nil, sprites: nil)
       @map      = map
@@ -91,6 +105,7 @@ module Rubydoom
       top_clip   = Array.new(SCREEN_WIDTH, 0)
       bot_clip   = Array.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT - 1)
       visplanes  = Visplanes.new(SCREEN_WIDTH)
+      @drawsegs  = []
       open_columns = SCREEN_WIDTH
 
       @bsp.each_subsector_front_to_back(player.x, player.y) do |ssec_idx|
@@ -207,6 +222,12 @@ module Rubydoom
       y_bot_full = sy_bottom.ceil - 1
       return if y_top_full > PLAYFIELD_HEIGHT - 1 || y_bot_full < 0
 
+      # Build per-column clip bounds by walking the wall pass's drawseg
+      # list. For each drawseg whose x range overlaps the sprite, lerp
+      # its scale at this column and compare to the sprite's scale —
+      # if the drawseg is closer (larger scale), apply its silhouette.
+      spr_top, spr_bot = build_sprite_clip(scale, x_start, x_end)
+
       pal_colors = @palette ? @palette.colors : nil
       shade_row  = @colormap ? @colormap.row_for(light, 0, cam_z) : nil
       pixels     = pic.pixels
@@ -215,29 +236,120 @@ module Rubydoom
 
       x = x_start
       while x <= x_end
-        u = ((x - sx_left) * inv_scale).to_i
-        if u >= 0 && u < pic_w
-          uu = mirrored ? (pic_w - 1 - u) : u
-          y  = y_top_full < 0 ? 0 : y_top_full
-          yend = y_bot_full > PLAYFIELD_HEIGHT - 1 ? PLAYFIELD_HEIGHT - 1 : y_bot_full
-          while y <= yend
-            v = ((y - sy_top) * inv_scale).to_i
-            if v >= 0 && v < pic_h
-              idx = pixels[v][uu]
-              if idx && idx >= 0
-                if shade_row
-                  r, g, b = @colormap.shaded(shade_row, idx)
-                else
-                  r, g, b = pal_colors[idx]
+        clip_top = spr_top[x - x_start]
+        clip_bot = spr_bot[x - x_start]
+        if clip_top + 1 < clip_bot
+          u = ((x - sx_left) * inv_scale).to_i
+          if u >= 0 && u < pic_w
+            uu = mirrored ? (pic_w - 1 - u) : u
+            y  = y_top_full
+            y  = clip_top + 1 if y < clip_top + 1
+            y  = 0 if y < 0
+            yend = y_bot_full
+            yend = clip_bot - 1 if yend > clip_bot - 1
+            yend = PLAYFIELD_HEIGHT - 1 if yend > PLAYFIELD_HEIGHT - 1
+            while y <= yend
+              v = ((y - sy_top) * inv_scale).to_i
+              if v >= 0 && v < pic_h
+                idx = pixels[v][uu]
+                if idx && idx >= 0
+                  if shade_row
+                    r, g, b = @colormap.shaded(shade_row, idx)
+                  else
+                    r, g, b = pal_colors[idx]
+                  end
+                  fb.set_pixel(x, y, r, g, b)
                 end
-                fb.set_pixel(x, y, r, g, b)
               end
+              y += 1
             end
-            y += 1
           end
         end
         x += 1
       end
+    end
+
+    # Returns (spr_top, spr_bot) pair of length (x_end-x_start+1).
+    # `spr_top[i]` is "highest screen y the sprite must stay below at
+    # column x_start+i" (sprite needs y > spr_top); spr_bot is the
+    # opposite. Default no-clip: spr_top = -1, spr_bot = PLAYFIELD_HEIGHT.
+    def build_sprite_clip(sp_scale, x_start, x_end)
+      width   = x_end - x_start + 1
+      spr_top = Array.new(width, -1)
+      spr_bot = Array.new(width, PLAYFIELD_HEIGHT)
+
+      @drawsegs.each do |ds|
+        next if ds.x2 < x_start || ds.x1 > x_end
+        ds_span = ds.x2 - ds.x1
+        ds_span = 1 if ds_span == 0
+        inv_span = 1.0 / ds_span
+
+        ox_start = ds.x1 < x_start ? x_start : ds.x1
+        ox_end   = ds.x2 > x_end   ? x_end   : ds.x2
+
+        x = ox_start
+        while x <= ox_end
+          t = (x - ds.x1) * inv_span
+          ds_scale = ds.scale1 + (ds.scale2 - ds.scale1) * t
+          if ds_scale > sp_scale
+            i = x - x_start
+            if ds.solid
+              spr_top[i] = PLAYFIELD_HEIGHT
+              spr_bot[i] = -1
+            else
+              if ds.sil_top1
+                sy = (ds.sil_top1 + (ds.sil_top2 - ds.sil_top1) * t).floor
+                spr_top[i] = sy if sy > spr_top[i]
+              end
+              if ds.sil_bot1
+                sy = (ds.sil_bot1 + (ds.sil_bot2 - ds.sil_bot1) * t).floor
+                spr_bot[i] = sy if sy < spr_bot[i]
+              end
+            end
+          end
+          x += 1
+        end
+      end
+
+      [spr_top, spr_bot]
+    end
+
+    # Builds a DrawSeg from a seg that's about to be rendered.
+    # Silhouette endpoints are computed at the integer column boundaries
+    # (col_start..col_end) using the same 1/z lerp as the wall sampling,
+    # so depth comparisons against sprites stay consistent.
+    def record_drawseg(col_start, col_end, sx1, span_x, inv_z1, inv_z2,
+                       back_sector,
+                       back_ceil_world,  front_ceil_world,
+                       back_floor_world, front_floor_world,
+                       eye_y)
+      t1 = (col_start - sx1) / span_x
+      t2 = (col_end   - sx1) / span_x
+      inv_z_x1 = inv_z1 + (inv_z2 - inv_z1) * t1
+      inv_z_x2 = inv_z1 + (inv_z2 - inv_z1) * t2
+      scale1   = inv_z_x1 * FOCAL_LENGTH
+      scale2   = inv_z_x2 * FOCAL_LENGTH
+
+      if back_sector.nil?
+        @drawsegs << DrawSeg.new(col_start, col_end, scale1, scale2,
+                                 true, nil, nil, nil, nil)
+        return
+      end
+
+      sil_top1 = sil_top2 = nil
+      sil_bot1 = sil_bot2 = nil
+      if back_ceil_world < front_ceil_world
+        rel = back_ceil_world - eye_y
+        sil_top1 = (HALF_HEIGHT - rel * inv_z_x1 * FOCAL_LENGTH).floor
+        sil_top2 = (HALF_HEIGHT - rel * inv_z_x2 * FOCAL_LENGTH).floor
+      end
+      if back_floor_world > front_floor_world
+        rel = back_floor_world - eye_y
+        sil_bot1 = (HALF_HEIGHT - rel * inv_z_x1 * FOCAL_LENGTH).ceil
+        sil_bot2 = (HALF_HEIGHT - rel * inv_z_x2 * FOCAL_LENGTH).ceil
+      end
+      @drawsegs << DrawSeg.new(col_start, col_end, scale1, scale2,
+                               false, sil_top1, sil_top2, sil_bot1, sil_bot2)
     end
 
     def render_seg(fb, seg, linedef, player, cos_a, sin_a, eye_y, top_clip, bot_clip, visplanes)
@@ -331,6 +443,12 @@ module Rubydoom
       span_x   = 1e-6 if span_x.abs < 1e-6
       uoz1     = u1 * inv_z1
       uoz2     = u2 * inv_z2
+
+      record_drawseg(col_start, col_end, sx1, span_x, inv_z1, inv_z2,
+                     back_sector,
+                     back_ceil_world,  front_ceil_world,
+                     back_floor_world, front_floor_world,
+                     eye_y)
 
       newly_closed = 0
       x = col_start
