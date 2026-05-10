@@ -57,7 +57,7 @@ module Rubydoom
       palette  = Palette.from_wad(wad)
       colormap = Colormap.from_wad(wad, palette)
       graphics = Graphics.new(wad, palette)
-      textures = Textures.new(wad, palette, graphics)
+      @textures = AnimatedTextures.new(Textures.new(wad, palette, graphics))
       @flats   = AnimatedFlats.new(Flats.new(wad))
       images   = GosuImageCache.new(graphics)
 
@@ -71,9 +71,9 @@ module Rubydoom
       @player.angle = ENV["RUBYDOOM_ANGLE"].to_f if ENV["RUBYDOOM_ANGLE"]
       @hud        = HUD.new(images)
       @automap    = Automap.new(@map, bsp: @bsp)
-      sky         = Sky.for_map(map_name, textures)
+      sky         = Sky.for_map(map_name, @textures)
       @renderer3d = Renderer3D.new(@map, @bsp,
-                                   textures: textures, flats: @flats,
+                                   textures: @textures, flats: @flats,
                                    palette: palette, colormap: colormap,
                                    sky: sky)
       @state      = GameState.default
@@ -106,6 +106,7 @@ module Rubydoom
       update_view_height
       @doors.update_tic
       @flats.update_tic
+      @textures.update_tic
       @hud.update_tic(@state)
     end
 
