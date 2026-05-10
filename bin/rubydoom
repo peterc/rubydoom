@@ -4,7 +4,19 @@
 # substantially from YJIT. Enable it before any rendering code is required.
 RubyVM::YJIT.enable if defined?(RubyVM::YJIT) && !RubyVM::YJIT.enabled?
 
+require "optparse"
 require_relative "../lib/rubydoom"
+
+map_name = "E1M1"
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: rubydoom [options] [wad_path]"
+  opts.on("-m MAP", "--map MAP",
+          "Map to load (e.g. E1M1, E1M3, MAP01). Default: E1M1") do |m|
+    map_name = m.upcase
+  end
+  opts.on("-h", "--help", "Show this message") { puts opts; exit }
+end
+parser.parse!
 
 wad_path = ARGV[0] || File.expand_path("../doom1.wad", __dir__)
 unless File.exist?(wad_path)
@@ -13,6 +25,7 @@ end
 
 Rubydoom::App.new(
   wad_path: wad_path,
+  map_name: map_name,
   dump_frame_to: ENV["RUBYDOOM_DUMP_FRAME"],
   automap_mode: (ENV["RUBYDOOM_AUTOMAP_MODE"] || "lines").to_sym,
 ).show
