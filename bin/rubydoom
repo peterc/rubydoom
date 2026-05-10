@@ -1,0 +1,19 @@
+#!/usr/bin/env ruby
+
+# Pure-Ruby per-pixel sampling in the wall and visplane renderers benefits
+# substantially from YJIT. Enable it before any rendering code is required.
+RubyVM::YJIT.enable if defined?(RubyVM::YJIT) && !RubyVM::YJIT.enabled?
+
+require_relative "../lib/rubydoom"
+
+wad_path = ARGV[0] || File.expand_path("../doom1.wad", __dir__)
+unless File.exist?(wad_path)
+  abort "WAD not found at #{wad_path} — pass a path as the first arg"
+end
+
+Rubydoom::App.new(
+  wad_path: wad_path,
+  dump_frame_to: ENV["RUBYDOOM_DUMP_FRAME"],
+  automap_mode: (ENV["RUBYDOOM_AUTOMAP_MODE"] || "lines").to_sym,
+).show
+

@@ -1,0 +1,105 @@
+module Rubydoom
+  # Composes the DOOM status bar HUD using cached Gosu images.
+  # All coordinates are in original DOOM 320x200 screen space — scaling is
+  # the caller's responsibility (apply Gosu.scale around the draw call).
+  #
+  # Layout constants come from the vanilla DOOM source (st_stuff.c).
+  class HUD
+    STATUS_BAR_Y       = 168
+    STATUS_BAR_HEIGHT  = 32
+
+    BIG_NUM_Y          = 171
+    AMMO_RIGHT_X       = 44
+    HEALTH_RIGHT_X     = 90
+    ARMOR_RIGHT_X      = 221
+
+    ARMS_X             = 104
+    ARMS_Y             = STATUS_BAR_Y
+
+    FACE_X             = 143
+    FACE_Y             = 168
+
+    BIG_NUM_PREFIX     = "STTNUM"  # red, height 16
+
+    # Weapon ("psprite") position. DOOM positions weapon patches via
+    #   screen_xy = psp_xy - patch_offset_xy
+    # At rest psp->sx = 0 and psp->sy = WEAPONTOP = 32. There's also a
+    # vertical correction: with the status bar visible vanilla uses
+    # centery = viewheight/2 = 84 instead of the screen center 100, which
+    # shifts psprites up by 16 pixels. We fold that into the y constant
+    # rather than reproducing the full centery math here.
+    PSP_IDLE_X         = 0
+    PSP_IDLE_Y         = 32 - 16  # WEAPONTOP minus (SCREEN_CENTER_Y - VIEW_CENTER_Y)
+
+    # Z layers — higher draws on top.
+    Z_WEAPON           = 0
+    Z_STATUS_BAR_BG    = 1
+    Z_STATUS_BAR_FG    = 2
+
+    def initialize(images, face: Face.new)
+      @images = images
+      @face   = face
+    end
+
+    def update_tic(state)
+      @face.update_tic(state.health)
+    end
+
+    def draw(state)
+      draw_weapon(state)
+      draw_status_bar(state)
+    end
+
+    private
+
+    def draw_weapon(state)
+      lump = weapon_lump_for(state.current_weapon)
+      return unless lump
+      sprite = @images[lump]
+      sprite.draw_anchored(PSP_IDLE_X, PSP_IDLE_Y, Z_WEAPON)
+    end
+
+    def draw_status_bar(state)
+      # All status-bar elements use draw_anchored, which mirrors vanilla
+      # DOOM's V_DrawPatch (it applies the patch's left/top offsets).
+      # STBAR / STARMS / STTNUM* have (0,0) offsets so it's a no-op for
+      # them, but STFST00 has (-5,-2) and won't sit centered without it.
+      @images["STBAR"].draw_anchored(0, STATUS_BAR_Y, Z_STATUS_BAR_BG)
+      @images["STARMS"].draw_anchored(ARMS_X, ARMS_Y, Z_STATUS_BAR_FG)
+
+      draw_big_number(state.ammo,   right_x: AMMO_RIGHT_X,   y: BIG_NUM_Y)
+      draw_big_number(state.health, right_x: HEALTH_RIGHT_X, y: BIG_NUM_Y, percent: true)
+      draw_big_number(state.armor,  right_x: ARMOR_RIGHT_X,  y: BIG_NUM_Y, percent: true)
+
+      @images[@face.lump_name(state.health)].draw_anchored(FACE_X, FACE_Y, Z_STATUS_BAR_FG)
+    end
+
+    # Right-aligned: rightmost digit's right edge sits at right_x. The
+    # optional % glyph is drawn with its left edge at right_x (so the
+    # digits are unaffected by adding the %).
+    def draw_big_number(value, right_x:, y:, percent: false)
+      if percent
+        @images["STTPRCNT"].draw_anchored(right_x, y, Z_STATUS_BAR_FG)
+      end
+      cursor = right_x
+      value.to_s.reverse.each_char do |digit|
+        glyph = @images["#{BIG_NUM_PREFIX}#{digit}"]
+        cursor -= glyph.width
+        glyph.draw_anchored(cursor, y, Z_STATUS_BAR_FG)
+      end
+    end
+
+    def weapon_lump_for(weapon)
+      case weapon
+      when :fist     then "PUNGA0"
+      when :pistol   then "PISGA0"
+      when :shotgun  then "SHTGA0"
+      when :chaingun then "CHGGA0"
+      when :rocket   then "MISGA0"
+      when :plasma   then "PLSGA0"
+      when :bfg      then "BFGGA0"
+      when :chainsaw then "SAWGA0"
+      end
+    end
+  end
+end

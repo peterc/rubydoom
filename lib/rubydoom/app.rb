@@ -1,0 +1,267 @@
+require "gosu"
+
+module Rubydoom
+  # DOOM's native screen size is 320x200. We scale up via Gosu.scale so
+  # the rendering code can keep using original coordinates everywhere.
+  class App < Gosu::Window
+    SCREEN_WIDTH  = 320
+    SCREEN_HEIGHT = 200
+    DEFAULT_SCALE = 3
+    DEFAULT_MAP   = "E1M1"
+
+    BACKGROUND_FILL = Gosu::Color.rgb(0, 0, 0)
+
+    # DOOM's native tic rate. The whole game world advances in 1/35s
+    # steps, so we drive Gosu's update loop at the same rate and express
+    # speeds/timers in tics where they have a DOOM-spec value.
+    TIC_RATE          = 35
+    TIC_DT            = 1.0 / TIC_RATE
+
+    # Map units per tic. DOOM run = 50 mu/tic, walk = 25 mu/tic; we sit
+    # well below that since collision and AI aren't pressing us yet.
+    MOVE_SPEED_TIC    = 240.0 / TIC_RATE
+    # Degrees of yaw per pixel of mouse movement.
+    MOUSE_SENSITIVITY = 0.25
+    # Keyboard turn rate. DOOM's normal turn is 640 BAM/tic ≈ 3.515°/tic;
+    # we round up slightly so it feels responsive without a Shift modifier.
+    KEY_TURN_PER_TIC  = 4.0
+
+    # View bobbing. DOOM completes one bob cycle every 20 tics, so phase
+    # advances 2π/20 per tic. Amplitude is a visual choice (calibrated
+    # for our slower MOVE_SPEED). Ramp smooths amplitude up/down at
+    # start/stop so the bob doesn't snap on and off.
+    BOB_PHASE_PER_TIC = 2 * Math::PI / 20
+    BOB_AMPLITUDE     = 2.5
+    BOB_RAMP_TIME     = 0.12
+
+    # View-height smoothing on step-ups (DOOM's deltaviewheight). When
+    # the floor under the player changes, view_height absorbs the step
+    # so the eye stays put, then climbs back to NOMINAL at an
+    # accelerating rate (DELTA increment per tic). Mirrors p_user.c.
+    DELTA_VIEW_INIT_DIV    = 8     # initial delta = (target - current) / 8
+    DELTA_VIEW_ACCEL       = 0.25  # delta gains this per tic
+    VIEW_HEIGHT_FLOOR_FRAC = 0.5   # don't dip below half nominal
+
+    def initialize(wad_path:, map_name: DEFAULT_MAP, scale: DEFAULT_SCALE,
+                   dump_frame_to: nil, show_automap: false,
+                   automap_mode: :lines)
+      @scale = scale
+      @dump_frame_to = dump_frame_to
+      @show_automap = show_automap
+      @automap_mode = automap_mode
+      super(SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale,
+            update_interval: 1000.0 / TIC_RATE)
+      self.caption = "rubydoom — #{map_name}"
+
+      wad      = WAD.open(wad_path)
+      palette  = Palette.from_wad(wad)
+      colormap = Colormap.from_wad(wad, palette)
+      graphics = Graphics.new(wad, palette)
+      textures = Textures.new(wad, palette, graphics)
+      @flats   = AnimatedFlats.new(Flats.new(wad))
+      images   = GosuImageCache.new(graphics)
+
+      @map        = Map.load(wad, map_name)
+      @bsp        = Bsp.new(@map.nodes)
+      @clipper    = Clipper.new(@map, @bsp)
+      @doors      = Doors.new(@map)
+      @player     = Player.from_thing(@map.player_start)
+      @player.x     = ENV["RUBYDOOM_X"].to_f     if ENV["RUBYDOOM_X"]
+      @player.y     = ENV["RUBYDOOM_Y"].to_f     if ENV["RUBYDOOM_Y"]
+      @player.angle = ENV["RUBYDOOM_ANGLE"].to_f if ENV["RUBYDOOM_ANGLE"]
+      @hud        = HUD.new(images)
+      @automap    = Automap.new(@map, bsp: @bsp)
+      sky         = Sky.for_map(map_name, textures)
+      @renderer3d = Renderer3D.new(@map, @bsp,
+                                   textures: textures, flats: @flats,
+                                   palette: palette, colormap: colormap,
+                                   sky: sky)
+      @state      = GameState.default
+
+      # Skip the first frame's mouse delta — cursor starts wherever the OS
+      # left it, so the recenter would otherwise cause a sudden yaw jump.
+      @mouse_centered = false
+
+      @bob_phase = 0.0
+      @bob_amp   = 0.0
+
+      @last_floor_z      = @clipper.floor_at(@player.x, @player.y)
+      @delta_view_height = 0.0
+    end
+
+    def needs_cursor?
+      false
+    end
+
+    def draw
+      Gosu.scale(@scale) { render_scene }
+      dump_and_exit if @dump_frame_to
+    end
+
+    def update
+      return if @dump_frame_to
+      handle_mouse_look
+      handle_keyboard_turn
+      handle_movement
+      update_view_height
+      @doors.update_tic
+      @flats.update_tic
+      @hud.update_tic(@state)
+    end
+
+    def button_down(id)
+      case id
+      when Gosu::KB_ESCAPE then close
+      when Gosu::KB_TAB    then @show_automap = !@show_automap
+      when Gosu::KB_B      then @automap_mode = (@automap_mode == :bsp ? :lines : :bsp)
+      when Gosu::KB_SPACE  then @doors.try_use(@player)
+      when Gosu::KB_P
+        puts "RUBYDOOM_X=#{@player.x} RUBYDOOM_Y=#{@player.y} RUBYDOOM_ANGLE=#{@player.angle}"
+      end
+    end
+
+    private
+
+    def render_scene
+      Gosu.draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, BACKGROUND_FILL, -10)
+      if @show_automap
+        @automap.draw(@player, mode: @automap_mode)
+      else
+        @renderer3d.draw(@player)
+      end
+      @hud.draw(@state)
+    end
+
+    # Mouse-look: read the cursor's offset from the window center, convert
+    # it to yaw, then snap the cursor back to center so it never escapes
+    # the window. DOOM angle increases counter-clockwise (0=E, 90=N), so
+    # rightward mouse movement (positive dx) decreases the angle.
+    def handle_mouse_look
+      cx = width  / 2
+      cy = height / 2
+      unless @mouse_centered
+        self.mouse_x = cx
+        self.mouse_y = cy
+        @mouse_centered = true
+        return
+      end
+
+      dx = mouse_x - cx
+      if dx != 0
+        @player.angle = (@player.angle - dx * MOUSE_SENSITIVITY) % 360.0
+      end
+      self.mouse_x = cx
+      self.mouse_y = cy
+    end
+
+    # Left/right arrows yaw the player (DOOM keyboard-only style); the
+    # rate matches vanilla's normal turn speed so it composes naturally
+    # with mouse-look. Sign convention: DOOM angle increases CCW, so
+    # Left increases it.
+    def handle_keyboard_turn
+      turn_axis = bool_axis(Gosu::KB_LEFT, Gosu::KB_RIGHT)
+      return if turn_axis == 0
+      @player.angle = (@player.angle + turn_axis * KEY_TURN_PER_TIC) % 360.0
+    end
+
+    # WASD / arrows: W/S/Up/Down walk along the facing vector, A/D strafe
+    # perpendicular to it. The proposed delta goes through the Clipper,
+    # which blocks moves into walls / closed doors / overly-tall steps and
+    # falls back to a one-axis slide when the full move is blocked.
+    def handle_movement
+      walk_axis   = bool_axis2(Gosu::KB_W, Gosu::KB_UP, Gosu::KB_S, Gosu::KB_DOWN)
+      strafe_axis = bool_axis(Gosu::KB_D, Gosu::KB_A)
+      moving = walk_axis != 0 || strafe_axis != 0
+      update_bob(moving)
+      return unless moving
+
+      rad = @player.angle * Math::PI / 180.0
+      forward_x =  Math.cos(rad); forward_y =  Math.sin(rad)
+      right_x   =  Math.sin(rad); right_y   = -Math.cos(rad)
+
+      target_x = @player.x + (forward_x * walk_axis + right_x * strafe_axis) * MOVE_SPEED_TIC
+      target_y = @player.y + (forward_y * walk_axis + right_y * strafe_axis) * MOVE_SPEED_TIC
+      @player.x, @player.y = @clipper.slide(@player.x, @player.y, target_x, target_y)
+    end
+
+    # View-bob update. Amplitude eases toward BOB_AMPLITUDE while moving
+    # and toward zero when stopped (exponential smoothing); phase ticks
+    # forward at a constant rate so the sine output is continuous across
+    # start/stop transitions instead of jumping back to phase 0.
+    # Smooths the camera over step-ups (and step-downs, when we get
+    # them). On a floor-height change the player snaps to the new floor
+    # but view_height absorbs the delta so the eye stays put; then it
+    # climbs back to nominal at an accelerating rate.
+    def update_view_height
+      current_floor = @clipper.floor_at(@player.x, @player.y)
+      step          = current_floor - @last_floor_z
+      nominal       = NOMINAL_VIEW_HEIGHT.to_f
+
+      # On a step (up OR down), absorb the floor change so the eye
+      # stays put in absolute world space, then aim a delta back
+      # toward nominal. Negative delta on drops, positive on climbs.
+      if step != 0
+        @player.view_height -= step
+        @delta_view_height   = (nominal - @player.view_height) / DELTA_VIEW_INIT_DIV
+      end
+
+      prev = @player.view_height
+      @player.view_height += @delta_view_height
+
+      # Settle exactly when we cross nominal in the direction of
+      # recovery — without this, the next floor lookup would re-trigger
+      # the drift and the camera would never lock to nominal.
+      if (prev < nominal && @player.view_height >= nominal) ||
+         (prev > nominal && @player.view_height <= nominal)
+        @player.view_height = nominal
+        @delta_view_height  = 0.0
+      end
+
+      # Don't sink below half-nominal (matches vanilla's clamp).
+      min_h = nominal * VIEW_HEIGHT_FLOOR_FRAC
+      if @player.view_height < min_h
+        @player.view_height = min_h
+        @delta_view_height  = DELTA_VIEW_ACCEL if @delta_view_height <= 0
+      end
+
+      # Vanilla's deltaviewheight ticks up by 0.25 each tic, giving an
+      # accelerating recovery. We mirror that in whichever direction
+      # the recovery is heading.
+      if @delta_view_height != 0
+        sign = @delta_view_height > 0 ? 1 : -1
+        @delta_view_height += sign * DELTA_VIEW_ACCEL
+      end
+
+      @last_floor_z = current_floor
+    end
+
+    def update_bob(moving)
+      target_amp = moving ? BOB_AMPLITUDE : 0.0
+      alpha      = 1.0 - Math.exp(-TIC_DT / BOB_RAMP_TIME)
+      @bob_amp  += (target_amp - @bob_amp) * alpha
+      @bob_phase = (@bob_phase + BOB_PHASE_PER_TIC) % (2 * Math::PI)
+      @player.bob = @bob_amp * Math.sin(@bob_phase)
+    end
+
+    def bool_axis(positive_key, negative_key)
+      (Gosu.button_down?(positive_key) ? 1 : 0) -
+        (Gosu.button_down?(negative_key) ? 1 : 0)
+    end
+
+    # Two-key-per-direction variant for axes that accept either WASD or
+    # arrow input — pressing keys on both sides cancels.
+    def bool_axis2(pos_a, pos_b, neg_a, neg_b)
+      pos = (Gosu.button_down?(pos_a) || Gosu.button_down?(pos_b)) ? 1 : 0
+      neg = (Gosu.button_down?(neg_a) || Gosu.button_down?(neg_b)) ? 1 : 0
+      pos - neg
+    end
+
+    # Renders one frame into an offscreen image, saves it, and quits.
+    # Used to verify rendering without a human at the window.
+    def dump_and_exit
+      img = Gosu.record(SCREEN_WIDTH, SCREEN_HEIGHT) { render_scene }
+      img.save(@dump_frame_to)
+      close
+    end
+  end
+end
