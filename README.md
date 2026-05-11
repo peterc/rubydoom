@@ -9,6 +9,9 @@ The point of the project is not to be a DOOM implementation to *play*, but to be
 > [!NOTE]
 > The shareware version of DOOM1.WAD is needed but not included in this project due to licensing concerns. It is legal to download, however, and [you can get it here.](https://doomwiki.org/wiki/DOOM1.WAD)
 
+> [!IMPORTANT]
+> There is an [AI disclosure](#ai-disclosure) later in this document.
+
 ## Quick start in game mode
 
 You need Ruby (tested on 4.0.2 and 3.4.7 - or headlessly only on TruffleRuby 34), `bundle`, and, as mentioned above, a `DOOM1.WAD` (`doom1.wad` is also accepted as a filename) in the project root.
@@ -156,6 +159,14 @@ Documented at the top of `lib/rubydoom/demo.rb`. Compact binary:
 Edge codes form a stable, append-only table (`use`, `respawn`,
 `toggle_god`, `weapon_1..7`, `debug_*`) — older demos keep replaying
 as new edges are added.
+
+## AI disclosure
+
+While I've played Doom since it first came out and have a good technical understanding of how the Doom engine works, I did not hand-write this! Claude Code did most of the work (albeit with hundreds of prompts and guidance from me) and Codex covered some of the performance side and review.
+
+While the Doom engine was open sourced back in the 90s and is certainly in the training material for LLMs, this implementation is not a direct port from that source. Instead, I started with analyzing the WAD file, and figuring out how far we could get based solely on our collective knowledge of the game and the WAD assets. It wasn't until it came to implementing the sprites and entity behaviors (both of which rely on things hard coded into the game, rather than the WAD) that I caved in and gave Claude direct access to the source. Given that, I felt re-using the original GPL2 licence here was appropriate.
+
+Claude and Codex did not do a perfect job on their own, however, and after profiling I noticed a lot of things that could be redone, and set them out on that, which shaved a good 50% of time off rendering a tic. So we all got there as a group effort, but was the majority of the grunt work done by AI? Yes! :-)
 
 ## License
 
