@@ -51,12 +51,15 @@ module Rubydoom
       fall:        :a_fall,
     }.freeze
 
-    def initialize(map, combat, sight, movement, rng: Random.new)
-      @map      = map
-      @combat   = combat
-      @sight    = sight
-      @movement = movement
-      @rng      = rng
+    def initialize(map, combat, sight, movement, sound: nil,
+                   noise_alert: nil, rng: Random.new)
+      @map         = map
+      @combat      = combat
+      @sight       = sight
+      @movement    = movement
+      @sound       = sound
+      @noise_alert = noise_alert
+      @rng         = rng
     end
 
     def run_action(symbol, mobj, player)
@@ -119,18 +122,40 @@ module Rubydoom
 
     # ---------- A_Look ----------
 
-    # Pre-target idle. Each tic, if reaction_time has ticked down and the
-    # player is in front and visible, acquire the target and enter the
-    # see_state.
+    # Pre-target idle. Each tic, if reaction_time has ticked down and
+    # either (a) the noise-alert flood reached our sector, or (b) the
+    # player is in our forward cone with line of sight, acquire the
+    # target and transition to the see_state.
     def a_look(mobj, player)
       return if mobj.reaction_time && mobj.reaction_time > 0
-      # A monster that's already been damaged has a target set already
-      # and may have skipped straight to chase.
       return unless player.health > 0
+
+      noise_target = @noise_alert&.target_for(sector_index_for(mobj))
+      if noise_target
+        wake!(mobj, noise_target, player)
+        return
+      end
+
       return unless in_front_of?(mobj, player)
       return unless can_see_player?(mobj, player)
-      mobj.target = player
+      wake!(mobj, player, player)
+    end
+
+    # Acquire `target` and play the sight sound (vanilla A_See chains
+    # into the see-state via S_StartSound). Distance is from the
+    # monster to the listener (the actual player) so far-off shouts
+    # fade with distance.
+    def wake!(mobj, target, listener)
+      mobj.target = target
+      if @sound && mobj.info.see_sound
+        @sound.play_at(mobj.info.see_sound, mobj.thing.x, mobj.thing.y, listener)
+      end
       @combat.enter_state(mobj, mobj.info.see_state)
+    end
+
+    # Sector containing the monster — looked up via Clipper.
+    def sector_index_for(mobj)
+      @clipper&.sector_index_at(mobj.thing.x, mobj.thing.y)
     end
 
     # ---------- A_Chase ----------
@@ -207,13 +232,21 @@ module Rubydoom
     # one hitscan at the player.
     def a_pos_attack(mobj, player)
       return unless mobj.target
+      play_attack_sound(mobj, player)
       fire_bullet(mobj, player, spread_deg: POS_SPREAD_DEG, damage: pos_damage)
     end
 
     # Shotgun guy: 3 pellets, same spread / dice.
     def a_spos_attack(mobj, player)
       return unless mobj.target
+      play_attack_sound(mobj, player)
       SPOS_PELLETS.times { fire_bullet(mobj, player, spread_deg: POS_SPREAD_DEG, damage: pos_damage) }
+    end
+
+    def play_attack_sound(mobj, listener)
+      return unless @sound && mobj.info.attack_sound
+      @sound.play_at(mobj.info.attack_sound,
+                     mobj.thing.x, mobj.thing.y, listener)
     end
 
     def pos_damage
@@ -258,6 +291,7 @@ module Rubydoom
     # play the animation and miss.
     def a_troo_attack(mobj, player)
       return unless mobj.target
+      play_attack_sound(mobj, player)
       if approx_dist(mobj, player.x, player.y) <= MELEE_RANGE + 20
         damage = (1 + @rng.rand(8)) * 3
         player.take_damage(damage)
@@ -268,6 +302,7 @@ module Rubydoom
     # Demon: bite for melee damage when in range.
     def a_sarg_attack(mobj, player)
       return unless mobj.target
+      play_attack_sound(mobj, player)
       return unless approx_dist(mobj, player.x, player.y) <= MELEE_RANGE + 20
       damage = (1 + @rng.rand(10)) * MELEE_DAMAGE_MULT
       player.take_damage(damage)
@@ -275,14 +310,19 @@ module Rubydoom
 
     # ---------- A_Pain / A_Scream / A_Fall ----------
 
-    # Vanilla A_Pain plays the species's pain-sound. No-op for now —
-    # the per-state animation already conveys the wince. Sound hookups
-    # land here when we wire DSxxxx playback.
-    def a_pain(_mobj, _player); end
+    # Vanilla A_Pain plays the species's pain-sound. Listener is the
+    # player so the volume scales by distance.
+    def a_pain(mobj, player)
+      return unless @sound && mobj.info.pain_sound
+      @sound.play_at(mobj.info.pain_sound, mobj.thing.x, mobj.thing.y, player)
+    end
 
-    # Vanilla A_Scream plays the death sound and may pick a more brutal
-    # "diehigh" variant. Stub for now.
-    def a_scream(_mobj, _player); end
+    # Vanilla A_Scream plays the death sound — fired on the second
+    # death frame, after the monster has dropped to the ground.
+    def a_scream(mobj, player)
+      return unless @sound && mobj.info.death_sound
+      @sound.play_at(mobj.info.death_sound, mobj.thing.x, mobj.thing.y, player)
+    end
 
     # A_Fall clears MF_SOLID — corpses get walked over. Combat already
     # sets `thing.solid_override = false` at start_death, but vanilla

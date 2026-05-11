@@ -113,9 +113,21 @@ module Rubydoom
       "7" => [:bfg],
     }.freeze
 
-    def initialize(hitscan:, combat: nil, rng: Random.new)
+    # Sound name per firing action. Looked up at action-frame entry to
+    # play the right DSxxxx lump (and to label the noise alert in logs).
+    FIRE_SOUNDS = {
+      fire_pistol:   :pistol,
+      fire_shotgun:  :shotgn,
+      fire_chaingun: :pistol,   # vanilla chaingun uses the pistol sample
+      punch:         :punch,
+      saw:           :sawful,
+    }.freeze
+
+    def initialize(hitscan:, combat: nil, sound: nil, noise_alert: nil, rng: Random.new)
       @hitscan      = hitscan
       @combat       = combat
+      @sound        = sound
+      @noise_alert  = noise_alert
       @rng          = rng
       @state        = :ready
       @seq_index    = 0
@@ -123,6 +135,12 @@ module Rubydoom
       @display_lump = nil
       @fire_button  = false
     end
+
+    # The Clipper is needed at fire time so we can compute which sector
+    # the player is in (for the noise alert flood entry). Late-bound
+    # because App constructs Weapons before it has a Clipper handy in
+    # any specific load_map flow.
+    attr_writer :clipper
 
     # Lump name to render this frame. While firing, returns the current
     # frame's lump; otherwise returns the weapon's idle lump. `player`
@@ -216,6 +234,8 @@ module Rubydoom
     end
 
     def do_action(action, player)
+      play_fire_sfx(action, player)
+      emit_noise(player) if FIRE_SOUNDS.key?(action)
       case action
       when :fire_pistol   then fire_pistol(player)
       when :fire_shotgun  then fire_shotgun(player)
@@ -223,6 +243,21 @@ module Rubydoom
       when :punch         then punch(player)
       when :saw           then saw(player)
       end
+    end
+
+    def play_fire_sfx(action, player)
+      name = FIRE_SOUNDS[action]
+      return unless name && @sound
+      @sound.play_at(name, player.x, player.y, player)
+    end
+
+    # Vanilla P_NoiseAlert: every firing action wakes monsters whose
+    # sectors are reachable from the player's sector via two-sided open
+    # lines (gated by ML_SOUNDBLOCK).
+    def emit_noise(player)
+      return unless @noise_alert && @clipper
+      sec_index = @clipper.sector_index_at(player.x, player.y)
+      @noise_alert.alert(player, sec_index)
     end
 
     def consume_ammo(player, type, amount = 1)

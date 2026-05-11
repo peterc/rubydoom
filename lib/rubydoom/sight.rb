@@ -34,9 +34,10 @@ module Rubydoom
         t = segment_intersect_t(sx, sy, dx, dy, ld)
         next if t.nil? || t <= 0 || t >= 1
 
-        # One-sided lines (or ML_BLOCKING two-sideds) always block.
+        # One-sided lines always block. ML_BLOCKING (impassable) two-
+        # sided lines stop movement but not sight — that's how you can
+        # see (and shoot) through the window slits in E1M1's entry hall.
         return false unless ld.two_sided?
-        return false if ld.impassable?  # rarely correct for sight but matches sim
 
         front = @map.linedef_front_sector(ld)
         back  = @map.linedef_back_sector(ld)

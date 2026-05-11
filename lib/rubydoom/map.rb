@@ -86,6 +86,51 @@ module Rubydoom
 
     THING_PLAYER_1_START = 1
 
+    # Vanilla MTF_* flags from doomdata.h. A thing is included in the
+    # spawn set when its flags AND the current skill's bit is non-zero.
+    THING_FLAG_EASY        = 0x01  # skills 1 (TYTD) and 2 (HNTR)
+    THING_FLAG_NORMAL      = 0x02  # skill 3 (HMP, vanilla default)
+    THING_FLAG_HARD        = 0x04  # skills 4 (UV) and 5 (NM)
+    THING_FLAG_AMBUSH      = 0x08  # "deaf" — doesn't wake on noise
+    THING_FLAG_MULTIPLAYER = 0x10  # multiplayer-only
+
+    # Skill numbers we accept. Conventionally:
+    #   0 = TYTD ("I'm too young to die")
+    #   1 = HNTR ("Hey, not too rough")
+    #   2 = HMP  ("Hurt me plenty")  ← vanilla default for new games
+    #   3 = UV   ("Ultra-Violence")
+    #   4 = NM   ("Nightmare") — same spawn set as UV; vanilla also makes
+    #            monsters move faster and respawn 12s after death. We
+    #            don't model those yet, so NM has the same difficulty
+    #            as UV in rubydoom for now.
+    SKILL_DEFAULT  = 2
+
+    # Types exempt from the skill filter: player starts (1-4), the
+    # deathmatch start (11), and the teleport landing pad (14). Vanilla
+    # never strips these — they're not "things" in the monster/pickup
+    # sense.
+    SKILL_EXEMPT_TYPES = [1, 2, 3, 4, 11, 14].freeze
+
+    # Map skill 0/1 → 1, skill 2 → 2, skill ≥3 → 4. Vanilla's
+    # `bit = 1 << (gameskill - 1)` with sk_baby clamped to bit 1 and
+    # sk_nightmare clamped to bit 4.
+    def self.skill_bit(skill)
+      case skill
+      when 0, 1 then THING_FLAG_EASY
+      when 2    then THING_FLAG_NORMAL
+      else           THING_FLAG_HARD
+      end
+    end
+
+    # True iff the thing should be spawned at this skill level. Players
+    # and pad types pass through; multiplayer-only things are dropped
+    # in single-player; everything else must have the skill's bit set.
+    def self.thing_in_skill?(thing, skill, netgame: false)
+      return true if SKILL_EXEMPT_TYPES.include?(thing.type)
+      return false if !netgame && (thing.flags & THING_FLAG_MULTIPLAYER) != 0
+      (thing.flags & skill_bit(skill)) != 0
+    end
+
     attr_reader :name, :things, :linedefs, :sidedefs, :vertexes,
                 :segs, :subsectors, :nodes, :sectors
 
@@ -109,7 +154,7 @@ module Rubydoom
       nil
     end
 
-    def self.load(wad, name)
+    def self.load(wad, name, skill: SKILL_DEFAULT, netgame: false)
       marker_index = wad.lumps.index { |l| l.name == name.upcase }
       raise "WAD has no map marker #{name.inspect}" unless marker_index
 
@@ -123,9 +168,12 @@ module Rubydoom
         lumps[expected] = lump
       end
 
+      all_things = parse_things(wad.bytes_for_lump(lumps["THINGS"]))
+      filtered = all_things.select { |t| thing_in_skill?(t, skill, netgame: netgame) }
+
       new(
         name:       name.upcase,
-        things:     parse_things(   wad.bytes_for_lump(lumps["THINGS"])),
+        things:     filtered,
         linedefs:   parse_linedefs( wad.bytes_for_lump(lumps["LINEDEFS"])),
         sidedefs:   parse_sidedefs( wad.bytes_for_lump(lumps["SIDEDEFS"])),
         vertexes:   parse_vertexes( wad.bytes_for_lump(lumps["VERTEXES"])),

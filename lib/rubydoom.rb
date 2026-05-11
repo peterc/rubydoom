@@ -31,6 +31,7 @@ require_relative "rubydoom/monster_info"
 require_relative "rubydoom/monster_states"
 require_relative "rubydoom/sight"
 require_relative "rubydoom/monster_movement"
+require_relative "rubydoom/noise_alert"
 require_relative "rubydoom/combat"
 require_relative "rubydoom/monster_ai"
 require_relative "rubydoom/weapons"
@@ -38,6 +39,7 @@ require_relative "rubydoom/face"
 
 # Gosu-dependent layers. Loaded last so non-graphical tools (asset dumps,
 # tests) can `require "rubydoom/wad"` etc. directly without pulling Gosu.
+require_relative "rubydoom/sound"
 require_relative "rubydoom/gosu_image_cache"
 require_relative "rubydoom/framebuffer"
 require_relative "rubydoom/hud"

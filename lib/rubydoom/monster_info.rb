@@ -17,6 +17,7 @@ module Rubydoom
       :reaction_time,
       :spawn_state, :see_state, :pain_state, :melee_state,
       :missile_state, :death_state, :xdeath_state, :raise_state,
+      :see_sound, :pain_sound, :death_sound, :attack_sound, :active_sound,
       :flags,
       keyword_init: true,
     )
@@ -36,6 +37,9 @@ module Rubydoom
         pain_state:    :poss_pain,
         missile_state: :poss_atk1,
         death_state:   :poss_die1,
+        see_sound:    :posit1, pain_sound: :popain,
+        death_sound:  :podth1, attack_sound: :pistol,
+        active_sound: :posact,
         flags: FLAG_COUNTKILL,
       ),
       # Shotgun guy (SPOS) — health 30, 3-pellet hitscan.
@@ -47,6 +51,9 @@ module Rubydoom
         pain_state:    :spos_pain,
         missile_state: :spos_atk1,
         death_state:   :spos_die1,
+        see_sound:    :bgsit1, pain_sound: :popain,
+        death_sound:  :bgdth1, attack_sound: :shotgn,
+        active_sound: :bgact,
         flags: FLAG_COUNTKILL,
       ),
       # Imp (TROO) — health 60, melee claw + (vanilla) fireball missile.
@@ -62,6 +69,9 @@ module Rubydoom
         melee_state:   :troo_atk1,
         missile_state: :troo_atk1,
         death_state:   :troo_die1,
+        see_sound:    :bgsit1, pain_sound: :popain,
+        death_sound:  :bgdth1, attack_sound: :claw,
+        active_sound: :bgact,
         flags: FLAG_COUNTKILL,
       ),
       # Demon (SARG) — health 150, melee only, faster than the others.
@@ -73,6 +83,9 @@ module Rubydoom
         pain_state:    :sarg_pain,
         melee_state:   :sarg_atk1,
         death_state:   :sarg_die1,
+        see_sound:    :sgtsit, pain_sound: :dmpain,
+        death_sound:  :sgtdth, attack_sound: :sgtatk,
+        active_sound: :dmact,
         flags: FLAG_COUNTKILL,
       ),
       # Spectre (also SARG, partial-invisibility flag in vanilla; we
@@ -86,6 +99,9 @@ module Rubydoom
         pain_state:    :sarg_pain,
         melee_state:   :sarg_atk1,
         death_state:   :sarg_die1,
+        see_sound:    :sgtsit, pain_sound: :dmpain,
+        death_sound:  :sgtdth, attack_sound: :sgtatk,
+        active_sound: :dmact,
         flags: FLAG_COUNTKILL,
       ),
     ].freeze

@@ -53,10 +53,16 @@ module Rubydoom
     # No-direction sentinel matching vanilla DI_NODIR.
     DI_NODIR = 8
 
-    def initialize(map)
+    def initialize(map, sound: nil)
       @map   = map
+      @sound = sound
       @mobjs = []
-      @by_thing = {}
+      # Identity-keyed: Thing is a Struct, and Struct.hash is value-based,
+      # so when the renderer/AI mutates a thing's sprite_override or
+      # frame_override the hash changes and a plain hash lookup misses
+      # the bucket. compare_by_identity locks lookups to object_id, which
+      # is what we actually want here (one mobj per Thing instance).
+      @by_thing = {}.compare_by_identity
       @ai = nil
 
       map.things.each do |t|
@@ -158,9 +164,12 @@ module Rubydoom
       # transition (e.g. A_Chase calling enter_state(missile_state));
       # if it does, we don't want to overwrite that — apply_action
       # returns true if it issued its own transition.
-      if st.action && @ai
-        # Re-snapshot the current state_key so we only honour the
-        # AI's transition if it actually changed it.
+      #
+      # @player is set each update_tic and is nil before the first tic
+      # (and in test code that pre-positions monsters via enter_state).
+      # Actions that read player state would NPE in that case, so we
+      # only fire actions when we have a player to hand them.
+      if st.action && @ai && @player
         before = mobj.state_key
         @ai.run_action(st.action, mobj, @player)
         return if mobj.state_key != before
@@ -258,6 +267,7 @@ module Rubydoom
     def explode(mobj, source)
       cx = mobj.thing.x.to_f
       cy = mobj.thing.y.to_f
+      @sound&.play_at(:barexp, cx, cy, source) if source
       if source
         damage_amt = falloff_damage(cx, cy, source.x, source.y)
         source.take_damage(damage_amt) if damage_amt > 0

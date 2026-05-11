@@ -41,6 +41,9 @@ module Rubydoom
   #     `Weapons` state machine consumes it on the next "ready" frame
   #     and updates `current_weapon`. nil means no switch pending.
   NOMINAL_VIEW_HEIGHT = 41
+  # Vanilla "deathviewheight" — the camera drops to this above the
+  # floor on death, simulating the body collapsing.
+  DEAD_VIEW_HEIGHT    = 8
 
   Player = Struct.new(:x, :y, :angle, :bob, :view_height,
                       :health, :armor, :armor_class,
@@ -157,6 +160,34 @@ module Rubydoom
 
     def has_weapon?(weapon)
       weapons_owned[weapon] ? true : false
+    end
+
+    # Dead = no health. Mirrors vanilla's `playerstate == PST_DEAD`
+    # gate on movement and combat actions.
+    def dead?
+      health <= 0
+    end
+
+    # Reset back to pistol-start state. Used on respawn — vanilla
+    # single-player restarts the level entirely; we just bring the
+    # player back at their last known map_start with default stats
+    # and leave the map state (open doors, dead monsters) intact.
+    def reset_to_start!(start_thing)
+      self.x = start_thing.x
+      self.y = start_thing.y
+      self.angle = start_thing.angle
+      self.bob = 0.0
+      self.view_height = NOMINAL_VIEW_HEIGHT.to_f
+      self.health = DEFAULT_MAX_HEALTH
+      self.armor  = 0
+      self.armor_class = nil
+      DEFAULT_AMMO.each { |k, v| self.ammo[k] = v }
+      self.current_weapon = :pistol
+      self.pending_weapon = nil
+      DEFAULT_WEAPONS.each { |k, v| self.weapons_owned[k] = v }
+      self.keys = self.class.empty_keys
+      self.backpack = false
+      DEFAULT_MAX_AMMO.each { |k, v| self.max_ammo[k] = v }
     end
 
     # Count for the current weapon's ammo type, or nil for melee.

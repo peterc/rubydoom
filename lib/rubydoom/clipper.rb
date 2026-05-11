@@ -54,13 +54,20 @@ module Rubydoom
     # to a subsector, then back to a sector via the subsector's first
     # seg (the seg's direction picks front or back sidedef).
     def sector_at(x, y)
+      @map.sectors[sector_index_at(x, y)]
+    end
+
+    # The integer sector index containing (x, y). Used by NoiseAlert,
+    # which keys per-sector state by index because Sector is a
+    # value-equality Struct.
+    def sector_index_at(x, y)
       ss_index = @bsp.subsector_at(x, y)
       ss = @map.subsectors[ss_index]
       seg = @map.segs[ss.first_seg_index]
       ld = @map.linedefs[seg.linedef_index]
       sd_index = seg.direction.zero? ? ld.front_sidedef_index : ld.back_sidedef_index
       sd = @map.sidedefs[sd_index]
-      @map.sectors[sd.sector_index]
+      sd.sector_index
     end
 
     def slide(x0, y0, x1, y1)
@@ -118,7 +125,28 @@ module Rubydoom
     # monsters have 20-30) and ignores per-thing AABB overlap (that's
     # done separately by MonsterMovement#position_clear?). Returns
     # true iff the position is clear.
-    def position_valid?(x, y, current_floor, radius)
+    #
+    # `start_x`/`start_y` are the position we're moving from. When
+    # provided, the step-up rule fires only for lines the BB has *newly*
+    # crossed — if we already straddled a line at the start, we're
+    # past the rule and the move is allowed to continue along it.
+    # Without that guard a monster whose bbox overhangs a ledge gets
+    # frozen: stepping back, sideways, or even diagonally still
+    # touches the wall, and the unconditional step rule rejects every
+    # option.
+    #
+    # `allow_dropoff` enforces vanilla's MF_DROPOFF flag. The default
+    # is true (player behaviour: walk off any ledge). Monsters pass
+    # false so they refuse drops greater than MAX_STEP — this is what
+    # keeps zombies from blindly stepping off high platforms in
+    # vanilla.
+    def position_valid?(x, y, current_floor, radius,
+                        start_x: nil, start_y: nil, allow_dropoff: true)
+      # Track the lowest neighbouring floor we'd touch — vanilla's
+      # tmdropoffz. After scanning every crossed line, refuse the move
+      # if the drop is steeper than MAX_STEP (when dropoff is forbidden).
+      drop_off_z = current_floor
+
       seen = nil
       each_linedef_near(x, y, radius) do |ld_index|
         seen ||= {}
@@ -138,8 +166,27 @@ module Rubydoom
         opening_bot = front.floor_height   > back.floor_height   ? front.floor_height   : back.floor_height
 
         return false if opening_top - opening_bot < PLAYER_HEIGHT
-        return false if opening_bot - current_floor > MAX_STEP
+
+        # Step-up only applies on a NEW straddle. If the BB already
+        # crossed this line at the start position, the actor is
+        # already on the wrong side of the step rule and we let them
+        # walk away.
+        already_straddling =
+          start_x && start_y && bb_straddles?(start_x, start_y, radius, ld)
+        unless already_straddling
+          return false if opening_bot - current_floor > MAX_STEP
+        end
+
+        # Update the drop-off tracker with this line's lower floor.
+        low_floor = front.floor_height < back.floor_height ? front.floor_height : back.floor_height
+        drop_off_z = low_floor if low_floor < drop_off_z
       end
+
+      # Vanilla: monsters (no MF_DROPOFF) refuse to step off a ledge
+      # taller than MAX_STEP. The check happens after the per-line scan
+      # so it sees the minimum-floor neighbour across every crossed line.
+      return false if !allow_dropoff && current_floor - drop_off_z > MAX_STEP
+
       true
     end
 

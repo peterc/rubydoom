@@ -44,11 +44,14 @@ module Rubydoom
 
     def initialize(wad_path:, map_name: DEFAULT_MAP, scale: DEFAULT_SCALE,
                    dump_frame_to: nil, show_automap: false,
-                   automap_mode: :lines)
+                   automap_mode: :lines, skill: nil)
       @scale = scale
       @dump_frame_to = dump_frame_to
       @show_automap = show_automap
       @automap_mode = automap_mode
+      # Skill: CLI / kwarg, else env override, else vanilla default
+      # (Hurt Me Plenty = 2). Range 0..4 — see Map::SKILL_DEFAULT.
+      @skill = (ENV["RUBYDOOM_SKILL"]&.to_i || skill || Map::SKILL_DEFAULT).to_i
       super(SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale,
             update_interval: 1000.0 / TIC_RATE,
             resizable: true)
@@ -61,6 +64,7 @@ module Rubydoom
       @flats    = AnimatedFlats.new(Flats.new(@wad))
       images    = GosuImageCache.new(graphics)
       @hud      = HUD.new(images)
+      @sound    = Sound.new(@wad)
 
       load_map(map_name)
       # Honour debug-spawn env vars on the initial map only; transitions
@@ -93,7 +97,7 @@ module Rubydoom
     # snap on a level change).
     def load_map(map_name)
       self.caption = "rubydoom — #{map_name}"
-      @map        = Map.load(@wad, map_name)
+      @map        = Map.load(@wad, map_name, skill: @skill)
       @bsp        = Bsp.new(@map.nodes)
       @clipper    = Clipper.new(@map, @bsp)
       @clipper.on_cross = method(:handle_walk_cross)
@@ -106,15 +110,26 @@ module Rubydoom
       @sector_effects = SectorEffects.new(@clipper)
       @pickups        = Pickups.new(@map)
       @player     = Player.from_thing(@map.player_start)
-      @combat     = Combat.new(@map)
+      @noise_alert = NoiseAlert.new(@map)
+      # Doors and walk-triggers propagate noise so monsters in the
+      # next room aren't caught flat-footed when the player walks in.
+      @doors.noise_alert = @noise_alert
+      @doors.clipper     = @clipper
+      @doors.sound       = @sound
+      @doors.listener    = @player
+      @combat     = Combat.new(@map, sound: @sound)
       @sight      = Sight.new(@map, @clipper)
       @monster_movement = MonsterMovement.new(@map, @clipper, @combat)
-      @monster_ai = MonsterAI.new(@map, @combat, @sight, @monster_movement)
+      @monster_ai = MonsterAI.new(@map, @combat, @sight, @monster_movement,
+                                  sound: @sound, noise_alert: @noise_alert)
       @monster_ai.clipper = @clipper
       @combat.ai  = @monster_ai
       @hitscan    = Hitscan.new(@map, @clipper)
-      @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat)
+      @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat,
+                                sound: @sound, noise_alert: @noise_alert)
+      @weapons.clipper = @clipper
       @hud.weapons = @weapons
+      @last_player_health = @player.health
       @automap    = Automap.new(@map, bsp: @bsp)
       sky         = Sky.for_map(map_name, @textures)
       @renderer3d = Renderer3D.new(@map, @bsp,
@@ -160,20 +175,26 @@ module Rubydoom
 
     def update
       return if @dump_frame_to
+      # Look-around still works dead; movement and weapons don't.
       handle_mouse_look
       handle_keyboard_turn
-      handle_movement
-      update_view_height
+      if @player.dead?
+        update_dead_view_height
+      else
+        handle_movement
+        update_view_height
+      end
       @doors.update_tic
       @plats.update_tic
       @floors.update_tic
       @scrollers.update_tic
       @sector_lights.update_tic
       @sector_effects.update_tic(@player)
-      @pickups.update_tic(@player)
+      @pickups.update_tic(@player) unless @player.dead?
       handle_fire_button
       @weapons.update_tic(@player)
       @combat.update_tic(@player)
+      handle_player_pain_sound
       @flats.update_tic
       @textures.update_tic
       @hud.update_tic(@player)
@@ -190,6 +211,22 @@ module Rubydoom
     end
 
     def button_down(id)
+      # While dead, only Esc / mouse-capture / Use / Fire are honoured.
+      # Use / Fire respawn. Everything else (movement, weapon switch,
+      # debug shortcuts) is suppressed so the dead state is sticky
+      # until the player explicitly resurrects.
+      if @player.dead?
+        case id
+        when Gosu::KB_ESCAPE
+          @captured ? release_mouse : close
+        when Gosu::MS_LEFT
+          if @captured then respawn_player else capture_mouse end
+        when Gosu::KB_SPACE, Gosu::KB_LEFT_CONTROL, Gosu::KB_RIGHT_CONTROL
+          respawn_player
+        when Gosu::KB_TAB then @show_automap = !@show_automap
+        end
+        return
+      end
       case id
       when Gosu::KB_ESCAPE
         @captured ? release_mouse : close
@@ -238,11 +275,22 @@ module Rubydoom
     # (once-only) handlers clear special_type so the trigger can't
     # re-fire; WR handlers leave it intact.
     def handle_walk_cross(ld)
-      if @plats.handle_cross(ld)
-        # WR — leave special intact.
-      elsif @floors.handle_cross(ld)
-        ld.special_type = 0  # W1 — consumed.
-      end
+      fired =
+        if @plats.handle_cross(ld)
+          true  # WR — leave special intact.
+        elsif @floors.handle_cross(ld)
+          ld.special_type = 0  # W1 — consumed.
+          true
+        else
+          false
+        end
+      return unless fired
+      # Any moving-sector trigger the player just stepped on is loud
+      # enough to wake monsters in the destination room (lift starting
+      # up, floor lowering, walk-trigger door opening). Same alert
+      # path as a gunshot.
+      sec_index = @clipper.sector_index_at(@player.x, @player.y)
+      @noise_alert.alert(@player, sec_index)
     end
 
     # On exit-switch fire, jump straight to whichever map's marker
@@ -276,6 +324,20 @@ module Rubydoom
       @hud.draw(@player)
     end
 
+    # Edge-detect player-health drops between tics so we can play the
+    # pain sound (vanilla dsplpain at <=quartered health, dsoof for
+    # smaller hits; we just use dsplpain for any damage). Resets the
+    # cached health on map transitions too.
+    def handle_player_pain_sound
+      return unless @last_player_health
+      if @player.health <= 0 && @last_player_health > 0
+        @sound&.play(:pldeth)
+      elsif @player.health < @last_player_health
+        @sound&.play(:plpain)
+      end
+      @last_player_health = @player.health
+    end
+
     # Each tic, tell the Weapons machine whether the fire button is held.
     # Sources: left-ctrl (vanilla key bind), or mouse-left while the
     # cursor is captured (the same click captures, so this only fires
@@ -285,7 +347,35 @@ module Rubydoom
       down = Gosu.button_down?(Gosu::KB_LEFT_CONTROL) ||
              Gosu.button_down?(Gosu::KB_RIGHT_CONTROL) ||
              (@captured && Gosu.button_down?(Gosu::MS_LEFT))
-      @weapons.fire_button = down
+      # Dead player can't fire — the button is reserved for respawn,
+      # which is edge-triggered in button_down.
+      @weapons.fire_button = false if @player.dead?
+      @weapons.fire_button = down unless @player.dead?
+    end
+
+    # View-height descent while dead. Vanilla drops `viewheight` by
+    # one map unit each tic until it hits DEAD_VIEW_HEIGHT, so the
+    # camera collapses to the floor over about half a second.
+    def update_dead_view_height
+      target = DEAD_VIEW_HEIGHT.to_f
+      if @player.view_height > target
+        @player.view_height -= 1.0
+        @player.view_height = target if @player.view_height < target
+      end
+      @last_floor_z = @clipper.floor_at(@player.x, @player.y)
+    end
+
+    # Respawn at the map's player_start. Single-player vanilla
+    # restarts the level on death; we keep the map state (open
+    # doors, dead monsters, etc.) and just reset the player.
+    def respawn_player
+      @player.reset_to_start!(@map.player_start)
+      @last_player_health = @player.health
+      @last_floor_z       = @clipper.floor_at(@player.x, @player.y)
+      @delta_view_height  = 0.0
+      # Skip the next mouse delta so capture-state cursor recenter
+      # doesn't snap the angle on respawn.
+      @mouse_centered     = false
     end
 
     # Mouse-look: read the cursor's offset from the window center, convert

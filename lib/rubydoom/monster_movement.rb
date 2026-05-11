@@ -141,13 +141,32 @@ module Rubydoom
 
     # Step destination is clear iff:
     #   - the Clipper allows a thing of mobj.info.radius at that point
-    #     (no wall, no step too high, no closed door, etc.)
+    #     (no wall, no step too high, no closed door, no ledge >24
+    #     deeper than the current floor)
     #   - the AABB doesn't overlap the player's
     #   - the radii don't overlap another live monster
+    #
+    # We pass the start position to position_valid? so the step-up
+    # rule fires only on lines the bbox is *newly* crossing — without
+    # that, a monster whose bbox already overhangs a wall (e.g. after
+    # spawning near it, or after another monster shoved them up
+    # against one) gets stuck because every direction still touches
+    # the wall and re-trips the rule.
+    #
+    # allow_dropoff: false enforces vanilla's "no MF_DROPOFF" rule.
+    # Regular monsters refuse to step off a ledge of more than 24
+    # units. None of POSS/SPOS/TROO/SARG have MF_DROPOFF in vanilla,
+    # so blanket-disabling is correct for our roster; lost souls /
+    # pain elementals would need a per-species opt-in when we get to
+    # them.
     def position_clear?(mobj, x, y, player)
       r = mobj.info.radius
       current_floor = @clipper.floor_at(mobj.thing.x, mobj.thing.y) || 0
-      return false unless @clipper.position_valid?(x, y, current_floor, r)
+      return false unless @clipper.position_valid?(
+        x, y, current_floor, r,
+        start_x: mobj.thing.x, start_y: mobj.thing.y,
+        allow_dropoff: false,
+      )
 
       # Don't walk into the player. Use AABB intersection — the
       # player is also AABB-modelled by Clipper.

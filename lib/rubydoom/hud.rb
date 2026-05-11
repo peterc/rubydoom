@@ -82,6 +82,12 @@ module Rubydoom
     private
 
     def draw_weapon(player)
+      # Vanilla's death drops the weapon off-screen via the PSPR
+      # state machine. We don't model that fully — just skip the
+      # draw while dead. View height interpolates to DEAD_VIEW_HEIGHT
+      # in parallel, so the camera is on the floor and the absent
+      # weapon reads as "body collapsed."
+      return if player.dead?
       lump = @weapons ? @weapons.display_lump(player) : weapon_lump_for(player.current_weapon)
       return unless lump
       sprite = @images[lump]

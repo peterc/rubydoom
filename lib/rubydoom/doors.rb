@@ -53,7 +53,16 @@ module Rubydoom
       @map     = map
       @active  = {}
       @neighbors_cache = nil
+      @noise_alert = nil
+      @clipper     = nil
+      @sound       = nil
     end
+
+    # Late-bound so App can construct Doors before the NoiseAlert /
+    # Clipper / Sound exist. When set, opening a door propagates a
+    # P_NoiseAlert from the player's sector and plays dsdoropn /
+    # dsdorcls at the door sector.
+    attr_writer :noise_alert, :clipper, :sound
 
     def try_use(player)
       rad = player.angle * Math::PI / 180.0
@@ -64,6 +73,7 @@ module Rubydoom
         if spec && ld.two_sided?
           return false unless spec[:key].nil? || player.has_key?(spec[:key])
           activate_door(ld, spec)
+          emit_noise(player)
           return true
         end
         # A solid line (one-sided or impassable) stops the ray cold —
@@ -92,7 +102,10 @@ module Rubydoom
           end
         when :waiting
           d.timer -= 1
-          d.state = :closing if d.timer <= 0
+          if d.timer <= 0
+            d.state = :closing
+            play_door_sound(d.sector, :dorcls)
+          end
         when :closing
           d.sector.ceiling_height -= DOOR_SPEED_TIC
           if d.sector.ceiling_height <= d.sector.floor_height
@@ -108,6 +121,12 @@ module Rubydoom
 
     private
 
+    def emit_noise(player)
+      return unless @noise_alert && @clipper
+      sec_index = @clipper.sector_index_at(player.x, player.y)
+      @noise_alert.alert(player, sec_index)
+    end
+
     def activate_door(ld, spec)
       sector = @map.linedef_back_sector(ld)
       return unless sector
@@ -119,7 +138,9 @@ module Rubydoom
         if existing.kind == :dr
           case existing.state
           when :waiting then existing.timer = WAIT_TICS
-          when :closing then existing.state = :opening
+          when :closing
+            existing.state = :opening
+            play_door_sound(sector, :doropn)
           end
         end
         return
@@ -127,10 +148,46 @@ module Rubydoom
       top = lowest_neighbor_ceiling(sector) - DOOR_GAP
       return if top <= sector.floor_height
       @active[sector.object_id] = Door.new(sector, top, :opening, 0, spec[:kind])
+      play_door_sound(sector, :doropn)
       # D1 doors are one-time use; vanilla clears the special so a
       # closed-again door can't be reopened (these stay open anyway).
       ld.special_type = 0 if spec[:kind] == :d1
     end
+
+    # Pick a representative point inside the door sector to anchor the
+    # sound. Vanilla uses the sector's sound origin (centroid); we
+    # approximate with the centroid of the sector's vertexes via the
+    # neighbors cache — overkill avoidable by just using any linedef.
+    # For our purposes the volume falloff is from the door to the
+    # player and we just need a point in the door's footprint.
+    def play_door_sound(sector, sound_name)
+      return unless @sound
+      # Find any linedef touching this sector and pick its midpoint.
+      @map.linedefs.each do |ld|
+        f = @map.linedef_front_sector(ld)
+        b = @map.linedef_back_sector(ld)
+        next unless f == sector || b == sector
+        v1 = @map.vertexes[ld.start_vertex_index]
+        v2 = @map.vertexes[ld.end_vertex_index]
+        mx = (v1.x + v2.x) * 0.5
+        my = (v1.y + v2.y) * 0.5
+        listener = @listener
+        if listener
+          @sound.play_at(sound_name, mx, my, listener)
+        else
+          @sound.play(sound_name)
+        end
+        return
+      end
+    end
+
+    public
+
+    # Listener for spatial sound. App sets this to the player; falls
+    # back to full-volume play if absent.
+    attr_writer :listener
+
+    private
 
     # Lowest ceiling among sectors that share a two-sided linedef with
     # this one. DOOM uses this as the open height for DR doors so the
