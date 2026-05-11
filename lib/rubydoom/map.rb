@@ -11,7 +11,12 @@ module Rubydoom
 
     Vertex = Struct.new(:x, :y)
 
-    Thing = Struct.new(:x, :y, :angle, :type, :flags, :removed)
+    # Things start out with their ThingTypes-default sprite/frame and
+    # solidity. The three `*_override` fields let runtime systems
+    # (Combat death sequences, scripted state changes) replace those
+    # without touching ThingTypes. nil = use default; non-nil wins.
+    Thing = Struct.new(:x, :y, :angle, :type, :flags, :removed,
+                       :sprite_override, :frame_override, :solid_override)
 
     LineDef = Struct.new(
       :start_vertex_index, :end_vertex_index,

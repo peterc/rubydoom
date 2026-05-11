@@ -4,11 +4,10 @@ module Rubydoom
   # ray from the player along their current facing and returns what the
   # bullet hits first.
   #
-  # We don't yet have monsters or shootable barrels, so the only thing a
-  # ray *can* hit is a wall. The fire entry-point returns a simple
-  # [:wall, x, y] / nil result so callers (Weapons) can later distinguish
-  # — and so monster damage can drop in as a `[:thing, mobj]` branch
-  # without changing the rest of the pipeline.
+  # Returns one of:
+  #   [:thing, thing, x, y]  — bullet hit a shootable (barrel, monster)
+  #   [:wall,  x, y]         — bullet hit a wall first
+  #   nil                    — out of range, nothing hit
   #
   # Two-sided lines don't block the bullet purely on `impassable?` (the
   # ML_BLOCKING flag stops monsters in vanilla but not bullets) — instead
@@ -23,9 +22,10 @@ module Rubydoom
     end
 
     # Cast a ray from the player at their facing angle + an optional
-    # +/- spread (degrees). Returns the [:wall, x, y] hit point, or nil
-    # if nothing was hit within `range`.
-    def fire(player, range: DEFAULT_RANGE, spread_deg: 0.0)
+    # +/- spread (degrees). `shootables` is a list of [thing, radius]
+    # tuples (Combat#shootables) — pass nil for wall-only checks. The
+    # nearest of (wall, any shootable) wins.
+    def fire(player, range: DEFAULT_RANGE, spread_deg: 0.0, shootables: nil)
       ang = player.angle
       ang += (rand - 0.5) * 2 * spread_deg unless spread_deg.zero?
       rad = ang * Math::PI / 180.0
@@ -33,16 +33,28 @@ module Rubydoom
       dy  = Math.sin(rad)
       eye = (@clipper.floor_at(player.x, player.y) || 0) + player.view_height
 
-      best_t = range
+      best_t   = range
+      best_hit = nil
+
       @map.linedefs.each do |ld|
         t = ray_linedef_t(player.x, player.y, dx, dy, ld)
         next unless t && t > 0 && t < best_t
         next unless blocks_bullet?(ld, eye)
-        best_t = t
+        best_t   = t
+        best_hit = :wall
       end
 
-      return nil if best_t >= range
-      [:wall, player.x + dx * best_t, player.y + dy * best_t]
+      shootables&.each do |thing, tr|
+        t = ray_circle_t(player.x, player.y, dx, dy, thing.x, thing.y, tr)
+        next unless t && t > 0 && t < best_t
+        best_t   = t
+        best_hit = thing
+      end
+
+      return nil if best_hit.nil?
+      hx = player.x + dx * best_t
+      hy = player.y + dy * best_t
+      best_hit == :wall ? [:wall, hx, hy] : [:thing, best_hit, hx, hy]
     end
 
     private
@@ -60,6 +72,21 @@ module Rubydoom
       s = ((v1.x - x0) * dy  - (v1.y - y0) * dx)  / denom
       return nil if t < 0 || s < 0 || s > 1
       t
+    end
+
+    # Parametric distance along the ray to where it first enters a
+    # circle of radius `r` centered at (cx, cy). Returns nil if the
+    # ray's perpendicular miss-distance exceeds the radius (no hit) or
+    # the entry point is behind us.
+    def ray_circle_t(px, py, dx, dy, cx, cy, r)
+      # Project (c - p) onto direction (d is unit-length).
+      tx = cx - px; ty = cy - py
+      proj = tx * dx + ty * dy
+      return nil if proj < 0
+      perp_sq = tx * tx + ty * ty - proj * proj
+      r_sq    = r * r
+      return nil if perp_sq > r_sq
+      proj - Math.sqrt(r_sq - perp_sq)
     end
 
     # A bullet at `eye` z is blocked by this line iff:

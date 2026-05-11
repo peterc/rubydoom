@@ -106,8 +106,9 @@ module Rubydoom
       "7" => [:bfg],
     }.freeze
 
-    def initialize(hitscan:, rng: Random.new)
+    def initialize(hitscan:, combat: nil, rng: Random.new)
       @hitscan      = hitscan
+      @combat       = combat
       @rng          = rng
       @state        = :ready
       @seq_index    = 0
@@ -226,9 +227,24 @@ module Rubydoom
       5 * (1 + @rng.rand(3))
     end
 
+    # 2 * (1 + rand(10)) = 2..20. Vanilla A_Punch / A_Saw.
+    def melee_damage
+      2 * (1 + @rng.rand(10))
+    end
+
+    def shoot(player, damage, range: Hitscan::DEFAULT_RANGE, spread_deg: 0.0)
+      result = @hitscan.fire(player,
+                             range: range,
+                             spread_deg: spread_deg,
+                             shootables: @combat&.shootables)
+      return unless @combat && result && result[0] == :thing
+      mobj = @combat.mobj_for(result[1])
+      @combat.damage(mobj, damage, source: player) if mobj
+    end
+
     def fire_pistol(player)
       consume_ammo(player, :bullet)
-      @hitscan.fire(player, spread_deg: 0.0)
+      shoot(player, bullet_damage)
     end
 
     def fire_chaingun(player)
@@ -236,29 +252,21 @@ module Rubydoom
       # firing frames so a full cycle eats two bullets.
       return if player.ammo[:bullet] <= 0
       consume_ammo(player, :bullet)
-      # Vanilla chaingun spread is ±5.6° (extra cone above the second
-      # shot). We approximate with a constant small spread.
-      @hitscan.fire(player, spread_deg: 5.6)
+      shoot(player, bullet_damage, spread_deg: 5.6)
     end
 
     def fire_shotgun(player)
       consume_ammo(player, :shell)
       # 7 pellets, ±5.6° horizontal spread (vanilla SHOTGUNSPREAD).
-      7.times { @hitscan.fire(player, spread_deg: 5.6) }
+      7.times { shoot(player, bullet_damage, spread_deg: 5.6) }
     end
 
-    def punch(_player)
-      # Melee. Vanilla cast is at 64-unit range with a small angle
-      # tolerance; we just call hitscan at melee range — no thing
-      # damage path yet, so this is a no-op result-wise.
-      # 2 * (1 + rand(10)) damage value computed for future use.
-      _ = 2 * (1 + @rng.rand(10))
-      @hitscan.fire(_player, range: 64.0)
+    def punch(player)
+      shoot(player, melee_damage, range: 64.0)
     end
 
-    def saw(_player)
-      _ = 2 * (1 + @rng.rand(10))
-      @hitscan.fire(_player, range: 64.0)
+    def saw(player)
+      shoot(player, melee_damage, range: 64.0)
     end
   end
 end

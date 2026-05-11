@@ -141,11 +141,17 @@ module Rubydoom
     # are walked through; everything else blocks. If the player already
     # overlapped the thing at the START position, the move is allowed —
     # otherwise a player spawned overlapping a prop would be stuck.
+    #
+    # We store thing references (not snapshot tuples) so live state —
+    # `thing.removed` after destruction, `thing.solid_override` after a
+    # barrel's MF_SOLID is cleared on death — drives collision without
+    # rebuilding the list.
     def thing_blocks?(start_x, start_y, x, y)
-      @solid_things.each do |tx, ty, tr|
+      @solid_things.each do |thing, tr|
+        next if thing.removed || thing.solid_override == false
         range = PLAYER_RADIUS + tr
-        next if (x - tx).abs >= range || (y - ty).abs >= range
-        next if (start_x - tx).abs < range && (start_y - ty).abs < range
+        next if (x - thing.x).abs >= range || (y - thing.y).abs >= range
+        next if (start_x - thing.x).abs < range && (start_y - thing.y).abs < range
         return true
       end
       false
@@ -191,7 +197,7 @@ module Rubydoom
       @map.things.filter_map do |t|
         info = ThingTypes[t.type]
         next unless info && info.solid
-        [t.x.to_f, t.y.to_f, info.radius.to_f]
+        [t, info.radius.to_f]
       end
     end
 

@@ -27,6 +27,7 @@ require_relative "rubydoom/sector_effects"
 require_relative "rubydoom/pickups"
 require_relative "rubydoom/player"
 require_relative "rubydoom/hitscan"
+require_relative "rubydoom/combat"
 require_relative "rubydoom/weapons"
 require_relative "rubydoom/face"
 

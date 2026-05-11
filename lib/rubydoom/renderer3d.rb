@@ -201,9 +201,9 @@ module Rubydoom
       out = []
       @map.things.each do |thing|
         next if thing.removed
-        info = ThingTypes[thing.type]
-        next unless info
-        frame = @sprites.frame_for(info.sprite, info.frame)
+        spr, frm = sprite_lookup_for(thing)
+        next unless spr
+        frame = @sprites.frame_for(spr, frm)
         next unless frame
 
         dx = thing.x - player.x
@@ -219,6 +219,19 @@ module Rubydoom
                              pic: pic, mirrored: mirrored, thing: thing)
       end
       out
+    end
+
+    # Sprite prefix + frame letter for a Thing — respects the runtime
+    # overrides Combat uses for animated death sequences (barrel BEXP
+    # cycle, monster death frames). Falls back to ThingTypes for the
+    # static spawn-state sprite.
+    def sprite_lookup_for(thing)
+      if thing.sprite_override
+        [thing.sprite_override, thing.frame_override || "A"]
+      else
+        info = ThingTypes[thing.type]
+        info && [info.sprite, info.frame]
+      end
     end
 
     # Vanilla R_ProjectSprite logic. ang = angle from camera to thing.

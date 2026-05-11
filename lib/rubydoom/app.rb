@@ -106,8 +106,9 @@ module Rubydoom
       @sector_effects = SectorEffects.new(@clipper)
       @pickups        = Pickups.new(@map)
       @player     = Player.from_thing(@map.player_start)
+      @combat     = Combat.new(@map)
       @hitscan    = Hitscan.new(@map, @clipper)
-      @weapons    = Weapons.new(hitscan: @hitscan)
+      @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat)
       @hud.weapons = @weapons
       @automap    = Automap.new(@map, bsp: @bsp)
       sky         = Sky.for_map(map_name, @textures)
@@ -167,6 +168,7 @@ module Rubydoom
       @pickups.update_tic(@player)
       handle_fire_button
       @weapons.update_tic(@player)
+      @combat.update_tic(@player)
       @flats.update_tic
       @textures.update_tic
       @hud.update_tic(@player)
