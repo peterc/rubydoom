@@ -18,9 +18,26 @@ parser = OptionParser.new do |opts|
 end
 parser.parse!
 
-wad_path = ARGV[0] || File.expand_path("../doom1.wad", __dir__)
-unless File.exist?(wad_path)
-  abort "WAD not found at #{wad_path} — pass a path as the first arg"
+# Look for the WAD under common case variations — id Software's
+# original ships as `DOOM1.WAD` (uppercase), the modern Steam / GOG
+# extracts come down as `doom1.wad` (lowercase), and at least one
+# distribution uses TitleCase. Try them in order and use the first
+# one that exists. Explicit positional arg always wins.
+WAD_CANDIDATES = %w[doom1.wad DOOM1.WAD Doom1.wad Doom1.WAD].freeze
+
+def resolve_wad(arg)
+  return arg if arg
+  WAD_CANDIDATES.each do |name|
+    path = File.expand_path("../#{name}", __dir__)
+    return path if File.exist?(path)
+  end
+  nil
+end
+
+wad_path = resolve_wad(ARGV[0])
+unless wad_path && File.exist?(wad_path)
+  abort "WAD not found (looked for #{WAD_CANDIDATES.join(" / ")} in " \
+        "the project root) — pass a path as the first arg"
 end
 
 # Benchmark mode bypasses Gosu entirely. RUBYDOOM_PLAY is required —

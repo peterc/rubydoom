@@ -9,6 +9,7 @@ GEM
 PLATFORMS
   arm64-darwin-25
   ruby
+  universal-java-21
 
 DEPENDENCIES
   gosu (~> 1.4)
@@ -23,4 +24,4 @@ CHECKSUMS
   stackprof (0.2.28) sha256=4ec2ace02f386012b40ca20ef80c030ad711831f59511da12e83b34efb0f9a04
 
 BUNDLED WITH
-  4.0.9
+   2.6.3
