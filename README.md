@@ -21,6 +21,10 @@ bin/rubydoom --map E1M3 doom1.wad     # play a different map / wad
 
 Default controls: WASD or arrow keys to move, mouse to look (click in the window to capture the cursor, Esc to release), left-Ctrl or left-mouse to fire, Space to use, 1–7 to switch weapons, Tab toggles the automap, P prints the current world position to stdout for debugging purposes. Arrow keys can be used to rotate left/right, if you want to avoid using the mouse entirely.
 
+> [!TIP]
+> Pressing "G" while in game enables GOD MODE if you suck like me!! 😂
+
+
 ## Benchmarking
 
 The simulation can be driven deterministically: seed the RNG, record a demo, then replay it under different configurations. Output is identical given the same seed.
