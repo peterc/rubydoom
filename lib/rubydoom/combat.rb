@@ -83,13 +83,20 @@ module Rubydoom
     # symbols to the AI. Wiring is two-way and registered post-init.
     attr_accessor :ai
 
+    # [thing, radius, height] for each live mobj. The third element is
+    # needed by Hitscan's vertical aim — a shot has a slope and the
+    # target's vertical extent decides whether the ray actually enters
+    # the body at the line's t. Barrels are 42 tall in vanilla
+    # (mobjinfo MT_BARREL); monsters carry their own height.
+    BARREL_HEIGHT = 42.0
     def shootables
       out = []
       @mobjs.each do |m|
         next unless m.state == :alive
         radius = m.info ? m.info.radius : ThingTypes[m.thing.type]&.radius
         next unless radius
-        out << [m.thing, radius.to_f]
+        height = m.info ? m.info.height.to_f : BARREL_HEIGHT
+        out << [m.thing, radius.to_f, height]
       end
       out
     end
