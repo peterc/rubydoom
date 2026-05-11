@@ -32,6 +32,17 @@ module Rubydoom
     AMMO_PANEL_MAX_RIGHT_X = 314
     AMMO_PANEL_TYPES       = %i[bullet shell rocket cell].freeze
 
+    # Three stacked key icons between AMMO and FACE. Coords from
+    # st_stuff.c (ST_KEY0X / ST_KEY0Y, spacing 10). Slot order is
+    # blue, yellow, red — top to bottom. Each slot draws STKEYS0..2
+    # for cards and STKEYS3..5 for skulls; if the player holds both
+    # variants of a colour the skull is shown (vanilla rule — skull
+    # check overwrites the card assignment in st_stuff.c).
+    KEY_BOX_X    = 239
+    KEY_BOX_TOP_Y = 171
+    KEY_BOX_DY   = 10
+    KEY_COLOURS  = %i[blue yellow red].freeze
+
     # Weapon ("psprite") position. DOOM positions weapon patches via
     #   screen_xy = psp_xy - patch_offset_xy
     # At rest psp->sx = 0 and psp->sy = WEAPONTOP = 32. There's also a
@@ -88,8 +99,19 @@ module Rubydoom
       draw_big_number(player.armor,  right_x: ARMOR_RIGHT_X,  y: BIG_NUM_Y, percent: true)
 
       draw_ammo_panel(player)
+      draw_keys(player)
 
       @images[@face.lump_name(player.health)].draw_anchored(FACE_X, FACE_Y, Z_STATUS_BAR_FG)
+    end
+
+    def draw_keys(player)
+      KEY_COLOURS.each_with_index do |colour, i|
+        slot = player.keys[colour]
+        next unless slot[:card] || slot[:skull]
+        lump_idx = slot[:skull] ? i + 3 : i
+        y = KEY_BOX_TOP_Y + i * KEY_BOX_DY
+        @images["STKEYS#{lump_idx}"].draw_anchored(KEY_BOX_X, y, Z_STATUS_BAR_FG)
+      end
     end
 
     def draw_ammo_panel(player)
