@@ -41,7 +41,7 @@ module Rubydoom
       @listener = nil
     end
 
-    # Late-bound to avoid initialization-order dependencies in App.
+    # Late-bound to avoid initialization-order dependencies in Game#load_map.
     # `sound`/`listener` let the click play attenuated at the switch
     # position; without them we fall back to silent.
     attr_writer :doors, :plats, :sound, :listener

@@ -1,9 +1,19 @@
 require "gosu"
 
 module Rubydoom
-  # DOOM's native screen size is 320x200. We scale up via Gosu.scale so
-  # the rendering code can keep using original coordinates everywhere.
+  # The Gosu-specific frontend. App owns the window, the per-frame draw,
+  # input polling (translated to a Game::Input each tic), and the
+  # Gosu-backed render/audio/asset-cache plumbing. Everything else lives
+  # in Game — App constructs a Game, hands it the HUD, and drives it via
+  # game.tick(input) once per Gosu update callback.
+  #
+  # This is the only file in the library that requires "gosu". An
+  # alternative frontend (SDL2, Raylib, headless) would replace this
+  # file and provide its own renderer / image cache / sound driver, but
+  # would leave Game untouched.
   class App < Gosu::Window
+    # DOOM's native screen size is 320x200. We scale up via Gosu.scale so
+    # the rendering code can keep using original coordinates everywhere.
     SCREEN_WIDTH  = 320
     SCREEN_HEIGHT = 200
     DEFAULT_SCALE = 3
@@ -11,68 +21,39 @@ module Rubydoom
 
     BACKGROUND_FILL = Gosu::Color.rgb(0, 0, 0)
 
-    # DOOM's native tic rate. The whole game world advances in 1/35s
-    # steps, so we drive Gosu's update loop at the same rate and express
-    # speeds/timers in tics where they have a DOOM-spec value.
-    TIC_RATE          = 35
-    TIC_DT            = 1.0 / TIC_RATE
-
-    # Map units per tic. DOOM run = 50 mu/tic, walk = 25 mu/tic; we sit
-    # well below that since collision and AI aren't pressing us yet.
-    MOVE_SPEED_TIC    = 240.0 / TIC_RATE
-    # Degrees of yaw per pixel of mouse movement.
-    MOUSE_SENSITIVITY = 0.25
-    # Keyboard turn rate. DOOM's normal turn is 640 BAM/tic ≈ 3.515°/tic;
-    # we round up slightly so it feels responsive without a Shift modifier.
-    KEY_TURN_PER_TIC  = 4.0
-
-    # View bobbing. DOOM completes one bob cycle every 20 tics, so phase
-    # advances 2π/20 per tic. Amplitude is a visual choice (calibrated
-    # for our slower MOVE_SPEED). Ramp smooths amplitude up/down at
-    # start/stop so the bob doesn't snap on and off.
-    BOB_PHASE_PER_TIC = 2 * Math::PI / 20
-    BOB_AMPLITUDE     = 2.5
-    BOB_RAMP_TIME     = 0.12
-
-    # View-height smoothing on step-ups (DOOM's deltaviewheight). When
-    # the floor under the player changes, view_height absorbs the step
-    # so the eye stays put, then climbs back to NOMINAL at an
-    # accelerating rate (DELTA increment per tic). Mirrors p_user.c.
-    DELTA_VIEW_INIT_DIV    = 8     # initial delta = (target - current) / 8
-    DELTA_VIEW_ACCEL       = 0.25  # delta gains this per tic
-    VIEW_HEIGHT_FLOOR_FRAC = 0.5   # don't dip below half nominal
-
     def initialize(wad_path:, map_name: DEFAULT_MAP, scale: DEFAULT_SCALE,
                    dump_frame_to: nil, show_automap: false,
                    automap_mode: :lines, skill: nil)
-      @scale = scale
+      @scale         = scale
       @dump_frame_to = dump_frame_to
-      @show_automap = show_automap
-      @automap_mode = automap_mode
+      @show_automap  = show_automap
+      @automap_mode  = automap_mode
       # Skill: CLI / kwarg, else env override, else vanilla default
       # (Hurt Me Plenty = 2). Range 0..4 — see Map::SKILL_DEFAULT.
-      @skill = (ENV["RUBYDOOM_SKILL"]&.to_i || skill || Map::SKILL_DEFAULT).to_i
+      skill_level = (ENV["RUBYDOOM_SKILL"]&.to_i || skill || Map::SKILL_DEFAULT).to_i
       super(SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale,
-            update_interval: 1000.0 / TIC_RATE,
+            update_interval: 1000.0 / Game::TIC_RATE,
             resizable: true)
-      @wad      = WAD.open(wad_path)
-      @palette  = Palette.from_wad(@wad)
-      @colormap = Colormap.from_wad(@wad, @palette)
-      graphics  = Graphics.new(@wad, @palette)
-      @textures = AnimatedTextures.new(Textures.new(@wad, @palette, graphics))
-      @sprites  = Sprites.new(@wad)
-      @flats    = AnimatedFlats.new(Flats.new(@wad))
-      images    = GosuImageCache.new(graphics)
-      @hud      = HUD.new(images)
-      @sound    = Sound.new(@wad)
+
+      wad    = WAD.open(wad_path)
+      @sound = Sound.new(wad)
+      @game  = Game.new(wad: wad, sound: @sound, skill: skill_level)
+
+      # HUD needs the Gosu-backed image cache, which needs Game's
+      # parsed graphics. Build the Gosu side now, hand the HUD to Game
+      # before the first load_map so the tick can include it.
+      images   = GosuImageCache.new(@game.graphics)
+      @hud     = HUD.new(images)
+      @game.hud = @hud
 
       load_map(map_name)
       # Honour debug-spawn env vars on the initial map only; transitions
       # spawn the player at the new map's player_start.
-      @player.x     = ENV["RUBYDOOM_X"].to_f     if ENV["RUBYDOOM_X"]
-      @player.y     = ENV["RUBYDOOM_Y"].to_f     if ENV["RUBYDOOM_Y"]
-      @player.angle = ENV["RUBYDOOM_ANGLE"].to_f if ENV["RUBYDOOM_ANGLE"]
-      @last_floor_z = @clipper.floor_at(@player.x, @player.y)
+      @game.debug_set_player(
+        x:     ENV["RUBYDOOM_X"]&.to_f,
+        y:     ENV["RUBYDOOM_Y"]&.to_f,
+        angle: ENV["RUBYDOOM_ANGLE"]&.to_f,
+      )
 
       # Skip the first frame's mouse delta — cursor starts wherever the OS
       # left it, so the recenter would otherwise cause a sudden yaw jump.
@@ -88,68 +69,22 @@ module Rubydoom
       # at least once while captured.
       @mouse_fire_armed = false
 
-      @bob_phase = 0.0
-      @bob_amp   = 0.0
-
-      @delta_view_height = 0.0
+      # Discrete button-down events queue up here between tics and are
+      # drained into Input#edges once per Gosu update callback.
+      @pending_edges = []
     end
 
-    # Build (or rebuild) every per-map subsystem. Asset state — palette,
-    # colormap, textures/flats/sprites caches, the gosu image cache, the
-    # HUD — persists across maps. Texture and flat animation
-    # phase carries over too, which feels right (the slime flow doesn't
-    # snap on a level change).
+    # Load a new map: delegate the simulation work to Game, then
+    # (re)build the Gosu-side renderers and update the window caption.
     def load_map(map_name)
       self.caption = "rubydoom — #{map_name}"
-      @map        = Map.load(@wad, map_name, skill: @skill)
-      @bsp        = Bsp.new(@map.nodes)
-      @clipper    = Clipper.new(@map, @bsp)
-      @clipper.on_cross = method(:handle_walk_cross)
-      @doors      = Doors.new(@map)
-      @plats      = Plats.new(@map)
-      @floors     = Floors.new(@map)
-      @switches   = Switches.new(@map)
-      @switches.doors = @doors
-      @switches.plats = @plats
-      @switches.sound = @sound
-      @plats.sound = @sound
-      @scrollers  = WallScrollers.new(@map)
-      @sector_lights  = SectorLights.new(@map)
-      @sector_effects = SectorEffects.new(@clipper)
-      @pickups        = Pickups.new(@map)
-      @pickups.sound  = @sound
-      @player     = Player.from_thing(@map.player_start)
-      @noise_alert = NoiseAlert.new(@map)
-      # Doors and walk-triggers propagate noise so monsters in the
-      # next room aren't caught flat-footed when the player walks in.
-      @doors.noise_alert = @noise_alert
-      @doors.clipper     = @clipper
-      @doors.sound       = @sound
-      @doors.listener    = @player
-      @switches.listener = @player
-      @plats.listener    = @player
-      @combat     = Combat.new(@map, sound: @sound)
-      @sight      = Sight.new(@map, @clipper)
-      @monster_movement = MonsterMovement.new(@map, @clipper, @combat)
-      @monster_ai = MonsterAI.new(@map, @combat, @sight, @monster_movement,
-                                  sound: @sound, noise_alert: @noise_alert)
-      @monster_ai.clipper = @clipper
-      @combat.ai  = @monster_ai
-      @projectiles = Projectiles.new(@map, @sight, @clipper, @combat,
-                                     sound: @sound)
-      @monster_ai.projectiles = @projectiles
-      @hitscan    = Hitscan.new(@map, @clipper)
-      @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat,
-                                sound: @sound, noise_alert: @noise_alert)
-      @weapons.clipper = @clipper
-      @hud.weapons = @weapons
-      @last_player_health = @player.health
-      @automap    = Automap.new(@map, bsp: @bsp)
-      sky         = Sky.for_map(map_name, @textures)
-      @renderer3d = Renderer3D.new(@map, @bsp,
-                                   textures: @textures, flats: @flats,
-                                   palette: @palette, colormap: @colormap,
-                                   sky: sky, sprites: @sprites)
+      @game.load_map(map_name)
+      sky = Sky.for_map(map_name, @game.textures)
+      @renderer3d = Renderer3D.new(@game.map, @game.bsp,
+                                   textures: @game.textures, flats: @game.flats,
+                                   palette: @game.palette, colormap: @game.colormap,
+                                   sky: sky, sprites: @game.sprites)
+      @automap = Automap.new(@game.map, bsp: @game.bsp)
       @exit_announced = false
     end
 
@@ -189,30 +124,7 @@ module Rubydoom
 
     def update
       return if @dump_frame_to
-      # Look-around still works dead; movement and weapons don't.
-      handle_mouse_look
-      handle_keyboard_turn
-      if @player.dead?
-        update_dead_view_height
-      else
-        handle_movement
-        update_view_height
-      end
-      @doors.update_tic
-      @plats.update_tic
-      @floors.update_tic
-      @scrollers.update_tic
-      @sector_lights.update_tic
-      @sector_effects.update_tic(@player)
-      @pickups.update_tic(@player) unless @player.dead?
-      handle_fire_button
-      @weapons.update_tic(@player)
-      @combat.update_tic(@player)
-      @projectiles.update_tic(@player)
-      handle_player_pain_sound
-      @flats.update_tic
-      @textures.update_tic
-      @hud.update_tic(@player)
+      @game.tick(build_input)
       announce_exit_if_pending
     end
 
@@ -225,58 +137,75 @@ module Rubydoom
       @focused = true
     end
 
+    # Translate one Gosu button press into either an immediate App-side
+    # action (window/display state — close, mouse capture, automap toggle)
+    # or a semantic edge that the game tic loop will consume. Everything
+    # game-relevant goes through @pending_edges so the simulation never
+    # sees a Gosu key code.
     def button_down(id)
-      # God-mode toggle (IDDQD equivalent). Handled before the dead-
-      # check so a fatal hit doesn't lock the player out of toggling
-      # back on; pressing it while dead also heals back to 100.
-      if id == Gosu::KB_G
-        on = @player.toggle_god!
-        puts "[god mode] #{on ? "ON" : "OFF"}"
-        return
-      end
-      # While dead, only Esc / mouse-capture / Use / Fire are honoured.
-      # Use / Fire respawn. Everything else (movement, weapon switch,
-      # debug shortcuts) is suppressed so the dead state is sticky
-      # until the player explicitly resurrects.
-      if @player.dead?
-        case id
-        when Gosu::KB_ESCAPE
-          @captured ? release_mouse : close
-        when Gosu::MS_LEFT
-          if @captured then respawn_player else capture_mouse end
-        when Gosu::KB_SPACE, Gosu::KB_LEFT_CONTROL, Gosu::KB_RIGHT_CONTROL
-          respawn_player
-        when Gosu::KB_TAB then @show_automap = !@show_automap
-        end
-        return
-      end
+      # Window / display actions are App-only — they don't affect game
+      # state, and they're honoured dead or alive.
       case id
       when Gosu::KB_ESCAPE
         @captured ? release_mouse : close
-      when Gosu::MS_LEFT
-        capture_mouse unless @captured
-      when Gosu::KB_TAB    then @show_automap = !@show_automap
-      when Gosu::KB_B      then @automap_mode = (@automap_mode == :bsp ? :lines : :bsp)
-      when Gosu::KB_SPACE  then @doors.try_use(@player) || @switches.try_use(@player)
+        return
+      when Gosu::KB_TAB
+        @show_automap = !@show_automap
+        return
+      when Gosu::KB_B
+        @automap_mode = (@automap_mode == :bsp ? :lines : :bsp)
+        return
       when Gosu::KB_P
-        puts "RUBYDOOM_X=#{@player.x} RUBYDOOM_Y=#{@player.y} RUBYDOOM_ANGLE=#{@player.angle}"
+        p = @game.player
+        puts "RUBYDOOM_X=#{p.x} RUBYDOOM_Y=#{p.y} RUBYDOOM_ANGLE=#{p.angle}"
+        return
+      when Gosu::MS_LEFT
+        if @captured
+          # First left-click while dead respawns; while alive the held-
+          # mouse state drives continuous fire, no edge to emit.
+          @pending_edges << :respawn if @game.player.dead?
+        else
+          capture_mouse
+        end
+        return
+      end
+
+      # God-mode toggle is always available, including while dead, so a
+      # fatal hit can't lock the player out of pressing G to resurrect.
+      if id == Gosu::KB_G
+        @pending_edges << :toggle_god
+        return
+      end
+
+      # While dead, every action key collapses to respawn; movement /
+      # weapon switch / debug shortcuts are suppressed.
+      if @game.player.dead?
+        case id
+        when Gosu::KB_SPACE, Gosu::KB_LEFT_CONTROL, Gosu::KB_RIGHT_CONTROL
+          @pending_edges << :respawn
+        end
+        return
+      end
+
+      case id
+      when Gosu::KB_SPACE         then @pending_edges << :use
       # Debug shortcuts for verifying that HUD numbers track player
       # state. Will go away once pickups / damage floors / combat
       # drive these on their own.
-      when Gosu::KB_LEFT_BRACKET   then @player.take_damage(10)
-      when Gosu::KB_RIGHT_BRACKET  then @player.add_health(10)
-      when Gosu::KB_BACKSLASH      then @player.add_armor(25, type: :green)
+      when Gosu::KB_LEFT_BRACKET  then @pending_edges << :debug_hurt
+      when Gosu::KB_RIGHT_BRACKET then @pending_edges << :debug_heal
+      when Gosu::KB_BACKSLASH     then @pending_edges << :debug_armor
       # Weapon selection — vanilla 1-7 keys. "1" cycles fist <->
       # chainsaw when both are owned; the rest map to a single weapon.
       # Switch is deferred to the next "ready" frame so a fire
       # animation in progress isn't interrupted.
-      when Gosu::KB_1 then @weapons.request_switch(@player, "1")
-      when Gosu::KB_2 then @weapons.request_switch(@player, "2")
-      when Gosu::KB_3 then @weapons.request_switch(@player, "3")
-      when Gosu::KB_4 then @weapons.request_switch(@player, "4")
-      when Gosu::KB_5 then @weapons.request_switch(@player, "5")
-      when Gosu::KB_6 then @weapons.request_switch(@player, "6")
-      when Gosu::KB_7 then @weapons.request_switch(@player, "7")
+      when Gosu::KB_1 then @pending_edges << :weapon_1
+      when Gosu::KB_2 then @pending_edges << :weapon_2
+      when Gosu::KB_3 then @pending_edges << :weapon_3
+      when Gosu::KB_4 then @pending_edges << :weapon_4
+      when Gosu::KB_5 then @pending_edges << :weapon_5
+      when Gosu::KB_6 then @pending_edges << :weapon_6
+      when Gosu::KB_7 then @pending_edges << :weapon_7
       end
     end
 
@@ -297,29 +226,6 @@ module Rubydoom
 
     private
 
-    # Walk-trigger dispatch. Clipper calls this for each special
-    # linedef the player crossed in the last successful slide. W1
-    # (once-only) handlers clear special_type so the trigger can't
-    # re-fire; WR handlers leave it intact.
-    def handle_walk_cross(ld)
-      fired =
-        if @plats.handle_cross(ld)
-          true  # WR — leave special intact.
-        elsif @floors.handle_cross(ld)
-          ld.special_type = 0  # W1 — consumed.
-          true
-        else
-          false
-        end
-      return unless fired
-      # Any moving-sector trigger the player just stepped on is loud
-      # enough to wake monsters in the destination room (lift starting
-      # up, floor lowering, walk-trigger door opening). Same alert
-      # path as a gunshot.
-      sec_index = @clipper.sector_index_at(@player.x, @player.y)
-      @noise_alert.alert(@player, sec_index)
-    end
-
     # On exit-switch fire, jump straight to whichever map's marker
     # lump comes next in the WAD directory (no intermission yet).
     # For doom1.wad the lumps happen to be stored in vanilla play
@@ -327,50 +233,70 @@ module Rubydoom
     # may sequence differently.
     def announce_exit_if_pending
       return if @exit_announced
-      return unless @switches.exit_requested
+      return unless @game.switches.exit_requested
       @exit_announced = true
-      next_name = Map.next_in_wad(@wad, @map.name)
+      next_name = Map.next_in_wad(@game.wad, @game.map.name)
       if next_name
-        puts "[exit] #{@map.name} → #{next_name}"
+        puts "[exit] #{@game.map.name} → #{next_name}"
         load_map(next_name)
-        @last_floor_z      = @clipper.floor_at(@player.x, @player.y)
-        @delta_view_height = 0.0
-        @player.view_height = NOMINAL_VIEW_HEIGHT.to_f
       else
-        puts "[exit] no further map after #{@map.name}"
+        puts "[exit] no further map after #{@game.map.name}"
       end
     end
 
     def render_scene
       Gosu.draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, BACKGROUND_FILL, -10)
+      player = @game.player
       if @show_automap
-        @automap.draw(@player, mode: @automap_mode)
+        @automap.draw(player, mode: @automap_mode)
       else
-        @renderer3d.draw(@player)
+        @renderer3d.draw(player)
       end
-      @hud.draw(@player)
+      @hud.draw(player)
     end
 
-    # Edge-detect player-health drops between tics so we can play the
-    # pain sound (vanilla dsplpain at <=quartered health, dsoof for
-    # smaller hits; we just use dsplpain for any damage). Resets the
-    # cached health on map transitions too.
-    def handle_player_pain_sound
-      return unless @last_player_health
-      if @player.health <= 0 && @last_player_health > 0
-        @sound&.play(:pldeth, source: @player)
-      elsif @player.health < @last_player_health
-        @sound&.play(:plpain, source: @player)
-      end
-      @last_player_health = @player.health
+    # Build the Input value for this tic. All Gosu polling lives here —
+    # everything downstream reads from the resulting struct.
+    def build_input
+      walk_axis   = bool_axis2(Gosu::KB_W, Gosu::KB_UP, Gosu::KB_S, Gosu::KB_DOWN)
+      strafe_axis = bool_axis(Gosu::KB_D, Gosu::KB_A)
+      turn_axis   = bool_axis(Gosu::KB_LEFT, Gosu::KB_RIGHT)
+      look_dx     = consume_mouse_dx
+      fire        = compute_fire_held
+      edges       = @pending_edges
+      @pending_edges = []
+      Input.new(walk_axis, strafe_axis, turn_axis, look_dx, fire, edges)
     end
 
-    # Each tic, tell the Weapons machine whether the fire button is held.
+    # Mouse-look: read the cursor's offset from the window center, snap
+    # the cursor back to center so it never escapes the window, and
+    # return the raw pixel delta. Returns 0 when the cursor isn't
+    # captured or the window isn't focused, and skips the first frame
+    # after capture so the recenter doesn't produce a yaw jump.
+    def consume_mouse_dx
+      return 0 unless @captured && @focused
+      cx = width  / 2
+      cy = height / 2
+      unless @mouse_centered
+        self.mouse_x = cx
+        self.mouse_y = cy
+        @mouse_centered = true
+        return 0
+      end
+      dx = mouse_x - cx
+      self.mouse_x = cx
+      self.mouse_y = cy
+      dx
+    end
+
+    # Resolve "is the fire button held this tic?" from continuous polls.
     # Sources: left-ctrl (vanilla key bind), or mouse-left while the
     # cursor is captured (the same click captures, so this only fires
     # *after* the first click — pressing mouse-left from "released"
-    # captures the mouse but doesn't fire that tic).
-    def handle_fire_button
+    # captures the mouse but doesn't fire that tic). Dead player can't
+    # fire; the button is reserved for respawn, which is edge-triggered.
+    def compute_fire_held
+      return false if @game.player.dead?
       ms_held = @captured && Gosu.button_down?(Gosu::MS_LEFT)
       # The mouse only fires once the capture-click has been released.
       # Re-arming on release means subsequent presses fire normally;
@@ -378,151 +304,9 @@ module Rubydoom
       # a shot the same tic.
       @mouse_fire_armed = true if @captured && !Gosu.button_down?(Gosu::MS_LEFT)
       ms_fire = ms_held && @mouse_fire_armed
-
-      down = Gosu.button_down?(Gosu::KB_LEFT_CONTROL) ||
-             Gosu.button_down?(Gosu::KB_RIGHT_CONTROL) ||
-             ms_fire
-      # Dead player can't fire — the button is reserved for respawn,
-      # which is edge-triggered in button_down.
-      @weapons.fire_button = false if @player.dead?
-      @weapons.fire_button = down unless @player.dead?
-    end
-
-    # View-height descent while dead. Vanilla drops `viewheight` by
-    # one map unit each tic until it hits DEAD_VIEW_HEIGHT, so the
-    # camera collapses to the floor over about half a second.
-    def update_dead_view_height
-      target = DEAD_VIEW_HEIGHT.to_f
-      if @player.view_height > target
-        @player.view_height -= 1.0
-        @player.view_height = target if @player.view_height < target
-      end
-      @last_floor_z = @clipper.floor_at(@player.x, @player.y)
-    end
-
-    # Respawn at the map's player_start. Single-player vanilla
-    # restarts the level on death; we keep the map state (open
-    # doors, dead monsters, etc.) and just reset the player.
-    def respawn_player
-      @player.reset_to_start!(@map.player_start)
-      @last_player_health = @player.health
-      @last_floor_z       = @clipper.floor_at(@player.x, @player.y)
-      @delta_view_height  = 0.0
-      # Skip the next mouse delta so capture-state cursor recenter
-      # doesn't snap the angle on respawn.
-      @mouse_centered     = false
-    end
-
-    # Mouse-look: read the cursor's offset from the window center, convert
-    # it to yaw, then snap the cursor back to center so it never escapes
-    # the window. DOOM angle increases counter-clockwise (0=E, 90=N), so
-    # rightward mouse movement (positive dx) decreases the angle.
-    def handle_mouse_look
-      return unless @captured && @focused
-      cx = width  / 2
-      cy = height / 2
-      unless @mouse_centered
-        self.mouse_x = cx
-        self.mouse_y = cy
-        @mouse_centered = true
-        return
-      end
-
-      dx = mouse_x - cx
-      if dx != 0
-        @player.angle = (@player.angle - dx * MOUSE_SENSITIVITY) % 360.0
-      end
-      self.mouse_x = cx
-      self.mouse_y = cy
-    end
-
-    # Left/right arrows yaw the player (DOOM keyboard-only style); the
-    # rate matches vanilla's normal turn speed so it composes naturally
-    # with mouse-look. Sign convention: DOOM angle increases CCW, so
-    # Left increases it.
-    def handle_keyboard_turn
-      turn_axis = bool_axis(Gosu::KB_LEFT, Gosu::KB_RIGHT)
-      return if turn_axis == 0
-      @player.angle = (@player.angle + turn_axis * KEY_TURN_PER_TIC) % 360.0
-    end
-
-    # WASD / arrows: W/S/Up/Down walk along the facing vector, A/D strafe
-    # perpendicular to it. The proposed delta goes through the Clipper,
-    # which blocks moves into walls / closed doors / overly-tall steps and
-    # falls back to a one-axis slide when the full move is blocked.
-    def handle_movement
-      walk_axis   = bool_axis2(Gosu::KB_W, Gosu::KB_UP, Gosu::KB_S, Gosu::KB_DOWN)
-      strafe_axis = bool_axis(Gosu::KB_D, Gosu::KB_A)
-      moving = walk_axis != 0 || strafe_axis != 0
-      update_bob(moving)
-      return unless moving
-
-      rad = @player.angle * Math::PI / 180.0
-      forward_x =  Math.cos(rad); forward_y =  Math.sin(rad)
-      right_x   =  Math.sin(rad); right_y   = -Math.cos(rad)
-
-      target_x = @player.x + (forward_x * walk_axis + right_x * strafe_axis) * MOVE_SPEED_TIC
-      target_y = @player.y + (forward_y * walk_axis + right_y * strafe_axis) * MOVE_SPEED_TIC
-      @player.x, @player.y = @clipper.slide(@player.x, @player.y, target_x, target_y)
-    end
-
-    # View-bob update. Amplitude eases toward BOB_AMPLITUDE while moving
-    # and toward zero when stopped (exponential smoothing); phase ticks
-    # forward at a constant rate so the sine output is continuous across
-    # start/stop transitions instead of jumping back to phase 0.
-    # Smooths the camera over step-ups (and step-downs, when we get
-    # them). On a floor-height change the player snaps to the new floor
-    # but view_height absorbs the delta so the eye stays put; then it
-    # climbs back to nominal at an accelerating rate.
-    def update_view_height
-      current_floor = @clipper.floor_at(@player.x, @player.y)
-      step          = current_floor - @last_floor_z
-      nominal       = NOMINAL_VIEW_HEIGHT.to_f
-
-      # On a step (up OR down), absorb the floor change so the eye
-      # stays put in absolute world space, then aim a delta back
-      # toward nominal. Negative delta on drops, positive on climbs.
-      if step != 0
-        @player.view_height -= step
-        @delta_view_height   = (nominal - @player.view_height) / DELTA_VIEW_INIT_DIV
-      end
-
-      prev = @player.view_height
-      @player.view_height += @delta_view_height
-
-      # Settle exactly when we cross nominal in the direction of
-      # recovery — without this, the next floor lookup would re-trigger
-      # the drift and the camera would never lock to nominal.
-      if (prev < nominal && @player.view_height >= nominal) ||
-         (prev > nominal && @player.view_height <= nominal)
-        @player.view_height = nominal
-        @delta_view_height  = 0.0
-      end
-
-      # Don't sink below half-nominal (matches vanilla's clamp).
-      min_h = nominal * VIEW_HEIGHT_FLOOR_FRAC
-      if @player.view_height < min_h
-        @player.view_height = min_h
-        @delta_view_height  = DELTA_VIEW_ACCEL if @delta_view_height <= 0
-      end
-
-      # Vanilla's deltaviewheight ticks up by 0.25 each tic, giving an
-      # accelerating recovery. We mirror that in whichever direction
-      # the recovery is heading.
-      if @delta_view_height != 0
-        sign = @delta_view_height > 0 ? 1 : -1
-        @delta_view_height += sign * DELTA_VIEW_ACCEL
-      end
-
-      @last_floor_z = current_floor
-    end
-
-    def update_bob(moving)
-      target_amp = moving ? BOB_AMPLITUDE : 0.0
-      alpha      = 1.0 - Math.exp(-TIC_DT / BOB_RAMP_TIME)
-      @bob_amp  += (target_amp - @bob_amp) * alpha
-      @bob_phase = (@bob_phase + BOB_PHASE_PER_TIC) % (2 * Math::PI)
-      @player.bob = @bob_amp * Math.sin(@bob_phase)
+      Gosu.button_down?(Gosu::KB_LEFT_CONTROL) ||
+        Gosu.button_down?(Gosu::KB_RIGHT_CONTROL) ||
+        ms_fire
     end
 
     def bool_axis(positive_key, negative_key)

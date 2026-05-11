@@ -37,6 +37,8 @@ require_relative "rubydoom/monster_ai"
 require_relative "rubydoom/projectiles"
 require_relative "rubydoom/weapons"
 require_relative "rubydoom/face"
+require_relative "rubydoom/input"
+require_relative "rubydoom/game"
 
 # Gosu-dependent layers. Loaded last so non-graphical tools (asset dumps,
 # tests) can `require "rubydoom/wad"` etc. directly without pulling Gosu.

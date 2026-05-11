@@ -27,7 +27,7 @@ module Rubydoom
       @listener = nil
     end
 
-    # Late-bound from App. dspstart plays when the lift starts moving;
+    # Late-bound from Game#load_map. dspstart plays when the lift starts moving;
     # dspstop plays when it reaches the lowered position and again
     # when it returns to the raised position.
     attr_writer :sound, :listener
