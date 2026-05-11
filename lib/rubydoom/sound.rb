@@ -28,25 +28,52 @@ module Rubydoom
       @wad        = wad
       @samples    = {}   # "PISTOL" -> Gosu::Sample or nil
       @temp_files = []   # keep Tempfiles alive (GC would unlink them)
+      # Per-source channel — vanilla DOOM's S_StartSound model. When
+      # the same source plays a new sound, the old one is cut off.
+      # Without this, the same monster firing twice quickly stacks
+      # both pistol samples on top of each other; with this it sounds
+      # like the rapid-fire one expects. Keyed by source object_id
+      # so value-equality Structs (Sector, Linedef) don't collide.
+      @channels = {}.compare_by_identity
     end
 
     # Play sound `name` at full volume. `name` is the bit after the
     # "DS" prefix — :pistol → "DSPISTOL". Missing lump = silent no-op.
-    def play(name)
-      sample_for(name)&.play
+    # `source:` is an optional handle (mobj, sector, …) used for the
+    # one-channel-per-source rule.
+    def play(name, source: nil)
+      sample = sample_for(name)
+      return unless sample
+      start_on_channel(source, sample, 1.0)
     end
 
     # Spatial play — distance from `(source_x, source_y)` to `listener`
     # determines volume. Cuts off entirely beyond CLIPPING_DIST.
-    def play_at(name, source_x, source_y, listener)
+    # `source:` enforces the per-source channel rule.
+    def play_at(name, source_x, source_y, listener, source: nil)
       sample = sample_for(name)
       return unless sample
       dist = Math.hypot(source_x - listener.x, source_y - listener.y)
       vol  = volume_for(dist)
-      sample.play(vol) if vol > 0.0
+      return if vol <= 0.0
+      start_on_channel(source, sample, vol)
     end
 
     private
+
+    # Cut off the previous sample on this source's channel and start
+    # a new one. With `source: nil` the channel is bypassed — useful
+    # for one-off sounds (pickups, switch clicks) where stacking is
+    # fine and the receiver is the player anyway.
+    def start_on_channel(source, sample, volume)
+      if source
+        prev = @channels[source]
+        prev.stop if prev && prev.playing?
+        @channels[source] = sample.play(volume)
+      else
+        sample.play(volume)
+      end
+    end
 
     def volume_for(dist)
       return 1.0 if dist <= CLOSE_DIST

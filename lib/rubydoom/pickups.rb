@@ -23,10 +23,19 @@ module Rubydoom
   #
   # Not yet (in TODO.txt): powerups (need timer system).
   class Pickups
+    # Weapon doomednums get `dswpnup`; everything else (health, ammo,
+    # armor, keys, backpack) gets `dsitemup`. Powerups, when we have
+    # them, will play `dsgetpow` — none of those types appear here yet.
+    WEAPON_DOOMEDNUMS = [2001, 2002, 2003, 2005].freeze
+
     def initialize(map)
       @map     = map
       @pending = collect_pickups
+      @sound   = nil
     end
+
+    # Late-bound so App can construct Pickups before Sound exists.
+    attr_writer :sound
 
     def update_tic(player)
       @pending.reject! do |thing|
@@ -34,6 +43,7 @@ module Rubydoom
         next false unless touches?(player, thing)
         if apply(player, thing)
           thing.removed = true
+          play_pickup_sound(thing)
           true
         else
           false  # leave it on the floor; player can come back
@@ -103,6 +113,13 @@ module Rubydoom
 
     def pickup?(doomednum)
       PICKUP_DOOMEDNUMS.include?(doomednum)
+    end
+
+    def play_pickup_sound(thing)
+      return unless @sound
+      name = WEAPON_DOOMEDNUMS.include?(thing.type) ? :wpnup : :itemup
+      # Pickup happens at point-blank range; just play at full volume.
+      @sound.play(name)
     end
 
     PICKUP_DOOMEDNUMS = [

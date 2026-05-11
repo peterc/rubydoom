@@ -267,7 +267,7 @@ module Rubydoom
     def explode(mobj, source)
       cx = mobj.thing.x.to_f
       cy = mobj.thing.y.to_f
-      @sound&.play_at(:barexp, cx, cy, source) if source
+      @sound&.play_at(:barexp, cx, cy, source, source: mobj) if source
       if source
         damage_amt = falloff_damage(cx, cy, source.x, source.y)
         source.take_damage(damage_amt) if damage_amt > 0

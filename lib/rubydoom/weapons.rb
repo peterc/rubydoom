@@ -248,7 +248,7 @@ module Rubydoom
     def play_fire_sfx(action, player)
       name = FIRE_SOUNDS[action]
       return unless name && @sound
-      @sound.play_at(name, player.x, player.y, player)
+      @sound.play_at(name, player.x, player.y, player, source: player)
     end
 
     # Vanilla P_NoiseAlert: every firing action wakes monsters whose

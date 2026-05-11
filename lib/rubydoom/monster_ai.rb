@@ -148,7 +148,8 @@ module Rubydoom
     def wake!(mobj, target, listener)
       mobj.target = target
       if @sound && mobj.info.see_sound
-        @sound.play_at(mobj.info.see_sound, mobj.thing.x, mobj.thing.y, listener)
+        @sound.play_at(mobj.info.see_sound, mobj.thing.x, mobj.thing.y, listener,
+                       source: mobj)
       end
       @combat.enter_state(mobj, mobj.info.see_state)
     end
@@ -246,7 +247,8 @@ module Rubydoom
     def play_attack_sound(mobj, listener)
       return unless @sound && mobj.info.attack_sound
       @sound.play_at(mobj.info.attack_sound,
-                     mobj.thing.x, mobj.thing.y, listener)
+                     mobj.thing.x, mobj.thing.y, listener,
+                     source: mobj)
     end
 
     def pos_damage
@@ -314,14 +316,16 @@ module Rubydoom
     # player so the volume scales by distance.
     def a_pain(mobj, player)
       return unless @sound && mobj.info.pain_sound
-      @sound.play_at(mobj.info.pain_sound, mobj.thing.x, mobj.thing.y, player)
+      @sound.play_at(mobj.info.pain_sound, mobj.thing.x, mobj.thing.y, player,
+                     source: mobj)
     end
 
     # Vanilla A_Scream plays the death sound — fired on the second
     # death frame, after the monster has dropped to the ground.
     def a_scream(mobj, player)
       return unless @sound && mobj.info.death_sound
-      @sound.play_at(mobj.info.death_sound, mobj.thing.x, mobj.thing.y, player)
+      @sound.play_at(mobj.info.death_sound, mobj.thing.x, mobj.thing.y, player,
+                     source: mobj)
     end
 
     # A_Fall clears MF_SOLID — corpses get walked over. Combat already

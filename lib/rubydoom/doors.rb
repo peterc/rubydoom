@@ -189,9 +189,9 @@ module Rubydoom
         my = (v1.y + v2.y) * 0.5
         listener = @listener
         if listener
-          @sound.play_at(sound_name, mx, my, listener)
+          @sound.play_at(sound_name, mx, my, listener, source: sector)
         else
-          @sound.play(sound_name)
+          @sound.play(sound_name, source: sector)
         end
         return
       end

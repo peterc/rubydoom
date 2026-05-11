@@ -37,10 +37,14 @@ module Rubydoom
       @exit_requested = false
       @doors = nil
       @plats = nil
+      @sound = nil
+      @listener = nil
     end
 
     # Late-bound to avoid initialization-order dependencies in App.
-    attr_writer :doors, :plats
+    # `sound`/`listener` let the click play attenuated at the switch
+    # position; without them we fall back to silent.
+    attr_writer :doors, :plats, :sound, :listener
 
     def try_use(player)
       rad = player.angle * Math::PI / 180.0
@@ -58,6 +62,9 @@ module Rubydoom
             @plats&.activate_tag(ld.sector_tag)
           end
         if fired
+          # Capture the type before we clear it so the exit-switch
+          # picks the louder, more emphatic `dsswtchx` sample.
+          play_switch_sound(ld, ld.special_type == S1_EXIT_LEVEL ? :swtchx : :swtchn)
           swap_switch_texture(ld)
           ld.special_type = 0 if ONCE_ONLY.include?(ld.special_type)
           return true
@@ -68,6 +75,21 @@ module Rubydoom
     end
 
     private
+
+    # Play the switch click at the linedef's midpoint so the volume
+    # attenuates from the actual switch, not the player.
+    def play_switch_sound(ld, sound_name)
+      return unless @sound
+      v1 = @map.vertexes[ld.start_vertex_index]
+      v2 = @map.vertexes[ld.end_vertex_index]
+      mx = (v1.x + v2.x) * 0.5
+      my = (v1.y + v2.y) * 0.5
+      if @listener
+        @sound.play_at(sound_name, mx, my, @listener, source: ld)
+      else
+        @sound.play(sound_name, source: ld)
+      end
+    end
 
     # Swap SW1xxx <-> SW2xxx on whichever of upper/middle/lower
     # textures of the front sidedef is currently set to a switch.

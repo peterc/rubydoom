@@ -111,10 +111,13 @@ module Rubydoom
       @switches   = Switches.new(@map)
       @switches.doors = @doors
       @switches.plats = @plats
+      @switches.sound = @sound
+      @plats.sound = @sound
       @scrollers  = WallScrollers.new(@map)
       @sector_lights  = SectorLights.new(@map)
       @sector_effects = SectorEffects.new(@clipper)
       @pickups        = Pickups.new(@map)
+      @pickups.sound  = @sound
       @player     = Player.from_thing(@map.player_start)
       @noise_alert = NoiseAlert.new(@map)
       # Doors and walk-triggers propagate noise so monsters in the
@@ -123,6 +126,8 @@ module Rubydoom
       @doors.clipper     = @clipper
       @doors.sound       = @sound
       @doors.listener    = @player
+      @switches.listener = @player
+      @plats.listener    = @player
       @combat     = Combat.new(@map, sound: @sound)
       @sight      = Sight.new(@map, @clipper)
       @monster_movement = MonsterMovement.new(@map, @clipper, @combat)
@@ -341,9 +346,9 @@ module Rubydoom
     def handle_player_pain_sound
       return unless @last_player_health
       if @player.health <= 0 && @last_player_health > 0
-        @sound&.play(:pldeth)
+        @sound&.play(:pldeth, source: @player)
       elsif @player.health < @last_player_health
-        @sound&.play(:plpain)
+        @sound&.play(:plpain, source: @player)
       end
       @last_player_health = @player.health
     end

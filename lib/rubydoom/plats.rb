@@ -23,7 +23,14 @@ module Rubydoom
       @map     = map
       @active  = {}
       @neighbors_cache = nil
+      @sound    = nil
+      @listener = nil
     end
+
+    # Late-bound from App. dspstart plays when the lift starts moving;
+    # dspstop plays when it reaches the lowered position and again
+    # when it returns to the raised position.
+    attr_writer :sound, :listener
 
     # Called by the walk-trigger dispatcher when a player crosses
     # a linedef. Returns true if the special was consumed.
@@ -47,15 +54,20 @@ module Rubydoom
             p.sector.floor_height = p.low
             p.state = :waiting
             p.timer = PLAT_WAIT_TICS
+            play_sector_sound(p.sector, :pstop)
           end
         when :waiting
           p.timer -= 1
-          p.state = :up if p.timer <= 0
+          if p.timer <= 0
+            p.state = :up
+            play_sector_sound(p.sector, :pstart)
+          end
         when :up
           p.sector.floor_height += PLAT_SPEED_TIC
           if p.sector.floor_height >= p.high
             p.sector.floor_height = p.high
             p.state = :done
+            play_sector_sound(p.sector, :pstop)
           end
         end
       end
@@ -83,12 +95,36 @@ module Rubydoom
         high = s.floor_height
         next if low >= high
         @active[s.object_id] = Plat.new(s, high, low, :down, 0)
+        play_sector_sound(s, :pstart)
         fired = true
       end
       fired
     end
 
     private
+
+    # Play `sound_name` at the centroid of a touching linedef on this
+    # sector. Vanilla anchors the sound to the sector's "sound origin"
+    # which is its centroid; a touching-line midpoint is close enough
+    # for our distance falloff to feel right.
+    def play_sector_sound(sector, sound_name)
+      return unless @sound
+      @map.linedefs.each do |ld|
+        f = @map.linedef_front_sector(ld)
+        b = @map.linedef_back_sector(ld)
+        next unless f == sector || b == sector
+        v1 = @map.vertexes[ld.start_vertex_index]
+        v2 = @map.vertexes[ld.end_vertex_index]
+        mx = (v1.x + v2.x) * 0.5
+        my = (v1.y + v2.y) * 0.5
+        if @listener
+          @sound.play_at(sound_name, mx, my, @listener, source: sector)
+        else
+          @sound.play(sound_name, source: sector)
+        end
+        return
+      end
+    end
 
     # Lowest floor among sectors that share a two-sided linedef with this
     # one (excluding the sector itself). Mirrors P_FindLowestFloorSurrounding.
