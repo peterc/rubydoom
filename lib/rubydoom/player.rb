@@ -33,6 +33,13 @@ module Rubydoom
   #     either variant is held. We track card-vs-skull separately so
   #     future Doom 2 specials that care about the distinction can
   #     check `keys[colour][:card]` / `[:skull]` directly.
+  #
+  # Weapons:
+  #   weapons_owned — hash of weapon symbol -> bool. Starts with fist
+  #     and pistol owned. Vanilla calls this `weaponowned[]`.
+  #   pending_weapon — symbol set by pickup or switch keypress; the
+  #     `Weapons` state machine consumes it on the next "ready" frame
+  #     and updates `current_weapon`. nil means no switch pending.
   NOMINAL_VIEW_HEIGHT = 41
 
   Player = Struct.new(:x, :y, :angle, :bob, :view_height,
@@ -41,7 +48,9 @@ module Rubydoom
                       :current_weapon,
                       :backpack,
                       :secrets_found,
-                      :keys) do
+                      :keys,
+                      :weapons_owned,
+                      :pending_weapon) do
     DEFAULT_MAX_HEALTH = 100
     SOULSPHERE_MAX     = 200
     DEFAULT_MAX_ARMOR  = 200
@@ -65,6 +74,30 @@ module Rubydoom
     DEFAULT_AMMO     = { bullet:  50, shell:  0, rocket:  0, cell:   0 }.freeze
     DEFAULT_MAX_AMMO = { bullet: 200, shell: 50, rocket: 50, cell: 300 }.freeze
 
+    # Starting weapons match vanilla: pistol-start gives you fist and
+    # pistol, no others.
+    DEFAULT_WEAPONS = {
+      fist: true, pistol: true,
+      shotgun: false, chaingun: false, rocket: false,
+      plasma: false, bfg: false, chainsaw: false,
+    }.freeze
+
+    # Vanilla clip sizes — one "clip" of each ammo type. P_GiveAmmo
+    # gives `2 * CLIPAMMO[type]` on first weapon pickup, half that on
+    # ammo-only items like CLIP / SHEL / BROK / CELL.
+    CLIPAMMO = { bullet: 10, shell: 4, rocket: 1, cell: 20 }.freeze
+
+    # Per-weapon pickup amount (ammo type + clip count). Used by
+    # pickup_weapon; weapons with no ammo (fist, chainsaw) skip this.
+    WEAPON_PICKUP_AMMO = {
+      shotgun:  [:shell,  2],
+      chaingun: [:bullet, 2],
+      rocket:   [:rocket, 2],
+      plasma:   [:cell,   2],
+      bfg:      [:cell,   2],
+      chainsaw: [nil,     0],
+    }.freeze
+
     def self.from_thing(thing)
       new(thing.x, thing.y, thing.angle, 0.0, NOMINAL_VIEW_HEIGHT.to_f,
           DEFAULT_MAX_HEALTH, 0, nil,
@@ -72,7 +105,9 @@ module Rubydoom
           :pistol,
           false,
           0,
-          empty_keys)
+          empty_keys,
+          DEFAULT_WEAPONS.dup,
+          nil)
     end
 
     # Fresh key inventory: no colour, no variant.
@@ -98,6 +133,30 @@ module Rubydoom
       return false if slot[variant]
       slot[variant] = true
       true
+    end
+
+    # Picks up a weapon (sets owned, gives starting ammo, auto-switches
+    # if new). Returns true if anything was absorbed — either the weapon
+    # itself was new, or the bundled ammo went into a non-full slot.
+    # Vanilla rule (P_GiveWeapon): always set pendingweapon to the new
+    # weapon on first pickup; on a duplicate, only the ammo matters.
+    def pickup_weapon(weapon)
+      ammo_type, clips = WEAPON_PICKUP_AMMO[weapon]
+      gave_ammo = false
+      if ammo_type && clips > 0
+        gave_ammo = add_ammo(ammo_type, clips * CLIPAMMO[ammo_type]) > 0
+      end
+      if weapons_owned[weapon]
+        gave_ammo
+      else
+        weapons_owned[weapon] = true
+        self.pending_weapon = weapon
+        true
+      end
+    end
+
+    def has_weapon?(weapon)
+      weapons_owned[weapon] ? true : false
     end
 
     # Count for the current weapon's ammo type, or nil for melee.

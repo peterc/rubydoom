@@ -106,6 +106,9 @@ module Rubydoom
       @sector_effects = SectorEffects.new(@clipper)
       @pickups        = Pickups.new(@map)
       @player     = Player.from_thing(@map.player_start)
+      @hitscan    = Hitscan.new(@map, @clipper)
+      @weapons    = Weapons.new(hitscan: @hitscan)
+      @hud.weapons = @weapons
       @automap    = Automap.new(@map, bsp: @bsp)
       sky         = Sky.for_map(map_name, @textures)
       @renderer3d = Renderer3D.new(@map, @bsp,
@@ -162,6 +165,8 @@ module Rubydoom
       @sector_lights.update_tic
       @sector_effects.update_tic(@player)
       @pickups.update_tic(@player)
+      handle_fire_button
+      @weapons.update_tic(@player)
       @flats.update_tic
       @textures.update_tic
       @hud.update_tic(@player)
@@ -194,6 +199,17 @@ module Rubydoom
       when Gosu::KB_LEFT_BRACKET   then @player.take_damage(10)
       when Gosu::KB_RIGHT_BRACKET  then @player.add_health(10)
       when Gosu::KB_BACKSLASH      then @player.add_armor(25, type: :green)
+      # Weapon selection — vanilla 1-7 keys. "1" cycles fist <->
+      # chainsaw when both are owned; the rest map to a single weapon.
+      # Switch is deferred to the next "ready" frame so a fire
+      # animation in progress isn't interrupted.
+      when Gosu::KB_1 then @weapons.request_switch(@player, "1")
+      when Gosu::KB_2 then @weapons.request_switch(@player, "2")
+      when Gosu::KB_3 then @weapons.request_switch(@player, "3")
+      when Gosu::KB_4 then @weapons.request_switch(@player, "4")
+      when Gosu::KB_5 then @weapons.request_switch(@player, "5")
+      when Gosu::KB_6 then @weapons.request_switch(@player, "6")
+      when Gosu::KB_7 then @weapons.request_switch(@player, "7")
       end
     end
 
@@ -251,6 +267,18 @@ module Rubydoom
         @renderer3d.draw(@player)
       end
       @hud.draw(@player)
+    end
+
+    # Each tic, tell the Weapons machine whether the fire button is held.
+    # Sources: left-ctrl (vanilla key bind), or mouse-left while the
+    # cursor is captured (the same click captures, so this only fires
+    # *after* the first click — pressing mouse-left from "released"
+    # captures the mouse but doesn't fire that tic).
+    def handle_fire_button
+      down = Gosu.button_down?(Gosu::KB_LEFT_CONTROL) ||
+             Gosu.button_down?(Gosu::KB_RIGHT_CONTROL) ||
+             (@captured && Gosu.button_down?(Gosu::MS_LEFT))
+      @weapons.fire_button = down
     end
 
     # Mouse-look: read the cursor's offset from the window center, convert

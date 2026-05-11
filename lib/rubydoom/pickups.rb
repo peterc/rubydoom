@@ -16,9 +16,12 @@ module Rubydoom
   #           box of rockets, backpack
   #   Keys:   blue/yellow/red cards + skull variants — locked doors
   #           in `Doors` consult `player.has_key?(:colour)`.
+  #   Weapons: shotgun / chaingun / rocket launcher / chainsaw — set
+  #           the weapon as owned and grant starting ammo; vanilla's
+  #           auto-switch is requested via `player.pending_weapon`,
+  #           consumed by the Weapons state machine.
   #
-  # Not yet (in TODO.txt): weapons (need weapons-owned set), powerups
-  # (need timer system).
+  # Not yet (in TODO.txt): powerups (need timer system).
   class Pickups
     def initialize(map)
       @map     = map
@@ -87,6 +90,12 @@ module Rubydoom
       when   40 then player.pickup_key(:blue,   :skull)             # blue skull
       when   39 then player.pickup_key(:yellow, :skull)             # yellow skull
       when   38 then player.pickup_key(:red,    :skull)             # red skull
+
+      # ---- Weapons ----
+      when 2001 then player.pickup_weapon(:shotgun)                 # shotgun
+      when 2002 then player.pickup_weapon(:chaingun)                # chaingun
+      when 2003 then player.pickup_weapon(:rocket)                  # rocket launcher
+      when 2005 then player.pickup_weapon(:chainsaw)                # chainsaw
       else
         false
       end
@@ -101,6 +110,7 @@ module Rubydoom
       2018, 2019, 2015,                   # armor
       2007, 2048, 2008, 2049, 2046, 8,    # ammo + backpack
       5, 6, 13, 38, 39, 40,               # keys (cards + skulls)
+      2001, 2002, 2003, 2005,             # weapons (shotgun/chaingun/rocket/chainsaw)
     ].freeze
   end
 end

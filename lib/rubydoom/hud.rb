@@ -61,7 +61,14 @@ module Rubydoom
     def initialize(images, face: Face.new)
       @images = images
       @face   = face
+      @weapons = nil
     end
+
+    # The Weapons state machine drives the PSPR frame each tic. App
+    # injects it after construction (per-map) since Weapons depends on
+    # the per-map Hitscan instance. nil falls back to the weapon's
+    # idle lump.
+    attr_writer :weapons
 
     def update_tic(player)
       @face.update_tic(player.health)
@@ -75,7 +82,7 @@ module Rubydoom
     private
 
     def draw_weapon(player)
-      lump = weapon_lump_for(player.current_weapon)
+      lump = @weapons ? @weapons.display_lump(player) : weapon_lump_for(player.current_weapon)
       return unless lump
       sprite = @images[lump]
       sprite.draw_anchored(PSP_IDLE_X, PSP_IDLE_Y, Z_WEAPON)
