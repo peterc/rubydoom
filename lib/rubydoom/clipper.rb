@@ -119,12 +119,19 @@ module Rubydoom
         # technically crossing.
         return false if opening_top - opening_bot < PLAYER_HEIGHT
 
-        # Step-up: only blocks when the move actually crosses the line.
-        # Sliding parallel along a tall ledge with the radius brushing
-        # it shouldn't trigger this check — otherwise a player who
-        # fell into a pit can't navigate inside it.
-        next if point_side(start_x, start_y, ld) == point_side(x, y, ld)
-        return false if opening_bot - current_floor > MAX_STEP
+        # Step-up applies when the move *newly* brings the player's
+        # bounding box across the line into the higher sector. If the
+        # BB already straddled at the start position — e.g. the player
+        # is navigating inside a pit whose surrounding floors are 24+
+        # higher — let them keep moving (they're already in violation
+        # and need to be able to escape). The center-side check that
+        # used to live here was too loose: in a corner of two tall
+        # ledges the BB could squeeze into the high-floor sector
+        # without the center crossing either linedef, letting the
+        # player end up effectively inside the wall.
+        if !bb_straddles?(start_x, start_y, r, ld) && bb_straddles?(x, y, r, ld)
+          return false if opening_bot - current_floor > MAX_STEP
+        end
       end
       true
     end
@@ -195,6 +202,26 @@ module Rubydoom
       b = @map.vertexes[ld.end_vertex_index]
       cross = (b.x - a.x) * (y - a.y) - (b.y - a.y) * (x - a.x)
       cross > 0 ? 1 : 0
+    end
+
+    # Does an axis-aligned bounding box of half-extent `r` centered at
+    # (cx, cy) have corners on both sides of the linedef? Used by the
+    # step-up rule to decide whether a move puts the player into a new
+    # sector (BB crossing) rather than just brushing a wall.
+    def bb_straddles?(cx, cy, r, ld)
+      a = @map.vertexes[ld.start_vertex_index]
+      b = @map.vertexes[ld.end_vertex_index]
+      dx = b.x - a.x
+      dy = b.y - a.y
+      pos = false
+      neg = false
+      [[-r, -r], [r, -r], [-r, r], [r, r]].each do |ox, oy|
+        cross = dx * (cy + oy - a.y) - dy * (cx + ox - a.x)
+        pos = true if cross > 0
+        neg = true if cross < 0
+        return true if pos && neg
+      end
+      false
     end
 
     # Distance from circle center (cx, cy) to the line *segment* (a, b)

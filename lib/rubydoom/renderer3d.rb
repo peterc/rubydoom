@@ -103,6 +103,14 @@ module Rubydoom
     def draw(player)
       fb = Framebuffer.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT)
       @player_angle_deg = player.angle
+      # Sky pre-fill on the upper half: anything ceiling-visplane-shaped
+      # that doesn't get emitted (because a near seg projects off-screen
+      # at extreme angles) still reads as "looking up" rather than as a
+      # HOM hole. Walls and other visplanes overdraw normally. The
+      # collision keeps the player ≥ PLAYER_RADIUS from every wall, so
+      # in normal play this pre-fill is fully overwritten. ENV-var
+      # debug positions can squeeze the camera into walls and may show
+      # sky bleed there — known limitation, see TODO.
       if @sky
         x = 0
         while x < SCREEN_WIDTH
@@ -826,8 +834,32 @@ module Rubydoom
 
     def draw_visplanes(fb, visplanes, eye_y, player, cos_a, sin_a)
       visplanes.each_plane do |plane|
-        next if plane.flat.sky?
-        draw_plane(fb, plane, eye_y, player, cos_a, sin_a)
+        if plane.flat.sky?
+          draw_sky_plane(fb, plane)
+        else
+          draw_plane(fb, plane, eye_y, player, cos_a, sin_a)
+        end
+      end
+    end
+
+    # Sky planes don't get the floor/ceiling rasterizer — they're
+    # drawn column-by-column using the sky texture, indexed by the
+    # player's view angle. The accumulated `plane.columns` already
+    # encodes exactly the columns and y-ranges that should show sky;
+    # we just iterate them.
+    def draw_sky_plane(fb, plane)
+      return unless @sky
+      cols = plane.columns
+      sx = 0
+      while sx < SCREEN_WIDTH
+        list = cols[sx]
+        if list
+          list.each do |range|
+            @sky.fill_column(fb, sx, range[0], range[1],
+                             @player_angle_deg, HALF_WIDTH, FOCAL_LENGTH, @palette)
+          end
+        end
+        sx += 1
       end
     end
 
