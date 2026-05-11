@@ -8,16 +8,17 @@ module Rubydoom
   # game.tick(input) once per Gosu update callback.
   #
   # Gosu is firewalled to the frontend layer: app.rb plus the renderers
-  # / framebuffer / image cache / HUD / sound driver (renderer3d.rb,
-  # automap.rb, framebuffer.rb, gosu_image_cache.rb, hud.rb, sound.rb).
-  # Of those, app.rb, renderer3d.rb, automap.rb, and gosu_image_cache.rb
-  # explicitly `require "gosu"`; framebuffer / hud / sound use Gosu types
-  # at runtime via the transitive load. Game and every per-map subsystem
-  # are pure Ruby — verifiable by loading game.rb in a process that
-  # doesn't require "gosu" and calling Game#tick with a synthetic Input.
-  # An alternative frontend (SDL2, Raylib, headless) would replace App
-  # plus those rendering / audio modules, but would leave Game and the
-  # rest of the simulation untouched.
+  # / framebuffer / image cache / HUD / sound driver / wipe (renderer3d.rb,
+  # automap.rb, framebuffer.rb, gosu_image_cache.rb, hud.rb, sound.rb,
+  # wipe.rb). Of those, app.rb, renderer3d.rb, automap.rb, and
+  # gosu_image_cache.rb explicitly `require "gosu"`; framebuffer / hud /
+  # sound / wipe use Gosu types at runtime via the transitive load. Game
+  # and every per-map subsystem are pure Ruby — verifiable by loading
+  # game.rb in a process that doesn't require "gosu" and calling
+  # Game#tick with a synthetic Input. An alternative frontend (SDL2,
+  # Raylib, headless) would replace App plus those rendering / audio
+  # modules, but would leave Game and the rest of the simulation
+  # untouched.
   class App < Gosu::Window
     # DOOM's native screen size is 320x200. We scale up via Gosu.scale so
     # the rendering code can keep using original coordinates everywhere.
@@ -32,6 +33,15 @@ module Rubydoom
     # the HUD (z = 100 inside hud.rb) so the wash covers the status bar
     # too, matching vanilla's whole-screen palette swap.
     Z_SCREEN_TINT = 1000
+
+    # Title screen hold before the launch wipe kicks off. Vanilla shows
+    # TITLEPIC for `pagetic = 170` tics (~4.85s at 35Hz); we use 105
+    # (~3s) because the demo loop / credit pages aren't wired and three
+    # seconds reads as a deliberate beat rather than a stall. Any
+    # button-down on the title screen skips ahead to the wipe.
+    TITLE_HOLD_TICS = 105
+    TITLE_LUMP      = "TITLEPIC"
+    Z_TITLE         = 0
 
     def initialize(wad_path:, map_name: DEFAULT_MAP, scale: DEFAULT_SCALE,
                    dump_frame_to: nil, show_automap: false,
@@ -53,9 +63,10 @@ module Rubydoom
 
       # HUD needs the Gosu-backed image cache, which needs Game's
       # parsed graphics. Build the Gosu side now, hand the HUD to Game
-      # before the first load_map so the tick can include it.
-      images   = GosuImageCache.new(@game.graphics)
-      @hud     = HUD.new(images)
+      # before the first load_map so the tick can include it. We keep
+      # the image cache around for non-HUD draws too (title screen).
+      @images  = GosuImageCache.new(@game.graphics)
+      @hud     = HUD.new(@images)
       @game.hud = @hud
 
       load_map(map_name)
@@ -84,6 +95,14 @@ module Rubydoom
       # Discrete button-down events queue up here between tics and are
       # drained into Input#edges once per Gosu update callback.
       @pending_edges = []
+
+      # Launch sequence: show TITLEPIC for TITLE_HOLD_TICS, then melt
+      # it into the first map. While the title is up, @title_tics_left
+      # > 0 and the simulation is paused; any button press collapses
+      # the timer to 0 so the wipe kicks off immediately. Skipped under
+      # dump mode (the dump path bypasses update and we want a clean
+      # gameplay frame).
+      @title_tics_left = @dump_frame_to ? 0 : TITLE_HOLD_TICS
     end
 
     # Load a new map: delegate the simulation work to Game, then
@@ -136,8 +155,30 @@ module Rubydoom
 
     def update
       return if @dump_frame_to
+      # Title screen → wipe → gameplay. While the title is up the sim
+      # is frozen; once the hold timer hits zero we bake the title
+      # into a texture and hand it to Wipe as the "old" image. Then
+      # the wipe runs (sim still frozen) until done, after which the
+      # tick loop takes over normally.
+      if @title_tics_left.positive?
+        @title_tics_left -= 1
+        @pending_edges.clear
+        start_launch_wipe if @title_tics_left.zero?
+        return
+      end
+      if @wipe
+        @wipe.tick
+        @pending_edges.clear
+        @wipe = nil if @wipe.done?
+        return
+      end
       @game.tick(build_input)
       announce_exit_if_pending
+    end
+
+    def start_launch_wipe
+      title = Gosu.render(SCREEN_WIDTH, SCREEN_HEIGHT) { draw_title }
+      @wipe = Wipe.new(title)
     end
 
     def lose_focus
@@ -155,6 +196,18 @@ module Rubydoom
     # game-relevant goes through @pending_edges so the simulation never
     # sees a Gosu key code.
     def button_down(id)
+      # Title-screen skip: any key (Esc still closes the game) ends the
+      # hold early. Setting to 1 means the next update tic decrements
+      # to zero and kicks off the launch wipe.
+      if @title_tics_left.positive?
+        if id == Gosu::KB_ESCAPE
+          close
+        else
+          @title_tics_left = 1
+        end
+        return
+      end
+
       # Window / display actions are App-only — they don't affect game
       # state, and they're honoured dead or alive.
       case id
@@ -250,13 +303,25 @@ module Rubydoom
       next_name = Map.next_in_wad(@game.wad, @game.map.name)
       if next_name
         puts "[exit] #{@game.map.name} → #{next_name}"
+        # Bake the current scene into a real texture (Gosu.render, not
+        # Gosu.record — we need subimage support) BEFORE swapping the
+        # map, then hand it to Wipe so the melt runs over the new map.
+        old_screen = Gosu.render(SCREEN_WIDTH, SCREEN_HEIGHT) { render_scene }
         load_map(next_name)
+        @wipe = Wipe.new(old_screen)
       else
         puts "[exit] no further map after #{@game.map.name}"
       end
     end
 
     def render_scene
+      # During the title hold we paint only the TITLEPIC — no playfield,
+      # no HUD, no tint. Once it's done, the launch wipe captures this
+      # same scene into a texture (see start_launch_wipe).
+      if @title_tics_left.positive?
+        draw_title
+        return
+      end
       Gosu.draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, BACKGROUND_FILL, -10)
       player = @game.player
       if @show_automap
@@ -266,6 +331,11 @@ module Rubydoom
       end
       @hud.draw(player)
       draw_screen_tint(player)
+      @wipe.draw if @wipe
+    end
+
+    def draw_title
+      @images[TITLE_LUMP].draw_at(0, 0, Z_TITLE)
     end
 
     # Vanilla "V_SetPalette" — a translucent red wash after damage,
@@ -350,6 +420,18 @@ module Rubydoom
     # Renders one frame into an offscreen image, saves it, and quits.
     # Used to verify rendering without a human at the window.
     def dump_and_exit
+      # Optional debug dumps:
+      #   RUBYDOOM_DUMP_TITLE=1 — just render TITLEPIC, no playfield
+      #   RUBYDOOM_WIPE_TICS=N — render the playfield with the title
+      #                          mid-wipe at tic N. Used to verify the
+      #                          wipe overlay composites correctly.
+      if ENV["RUBYDOOM_DUMP_TITLE"]
+        @title_tics_left = 1
+      elsif (tics = ENV["RUBYDOOM_WIPE_TICS"]&.to_i)
+        title = Gosu.render(SCREEN_WIDTH, SCREEN_HEIGHT) { draw_title }
+        @wipe = Wipe.new(title)
+        tics.times { @wipe.tick }
+      end
       img = Gosu.record(SCREEN_WIDTH, SCREEN_HEIGHT) { render_scene }
       img.save(@dump_frame_to)
       close
