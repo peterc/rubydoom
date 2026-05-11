@@ -1,0 +1,95 @@
+module Rubydoom
+  # Touch-driven item pickups. Every tic we walk the list of
+  # not-yet-picked-up pickup things and check AABB overlap with the
+  # player (the same radius math `Clipper#thing_blocks?` uses, except
+  # against the non-solid set). On overlap, the doomednum dispatches
+  # to a `pickup_*` method on Player, which decides whether the item
+  # was actually absorbed (e.g. a stimpack at full health isn't,
+  # leaving the pickup on the floor for later). Absorbed items get
+  # `removed = true` set; the renderer skips them and we drop them
+  # from our scan list.
+  #
+  # Currently implements (E1M1 set + a few more):
+  #   Health: stimpack, medikit, soulsphere, health bonus
+  #   Armor:  green armor, blue armor, armor bonus
+  #   Ammo:   clip, 4 shells, box of bullets, box of shells,
+  #           box of rockets, backpack
+  #
+  # Not yet (in TODO.txt): weapons (need weapons-owned set), keys
+  # (need keys set + door integration), powerups (need timer system).
+  class Pickups
+    def initialize(map)
+      @map     = map
+      @pending = collect_pickups
+    end
+
+    def update_tic(player)
+      @pending.reject! do |thing|
+        next true if thing.removed
+        next false unless touches?(player, thing)
+        if apply(player, thing)
+          thing.removed = true
+          true
+        else
+          false  # leave it on the floor; player can come back
+        end
+      end
+    end
+
+    private
+
+    # All map things that are flagged non-solid AND have a known
+    # pickup effect. Filters out decorations like the candle (which
+    # is non-solid but isn't a pickup).
+    def collect_pickups
+      @map.things.select do |t|
+        info = ThingTypes[t.type]
+        info && !info.solid && pickup?(t.type)
+      end
+    end
+
+    def touches?(player, thing)
+      info  = ThingTypes[thing.type]
+      range = Clipper::PLAYER_RADIUS + info.radius
+      (player.x - thing.x).abs < range && (player.y - thing.y).abs < range
+    end
+
+    # Dispatch on doomednum. Returns true if the item was absorbed
+    # (and should be removed from the world); false if the pickup
+    # was a no-op (player already maxed) so the item stays put.
+    def apply(player, thing)
+      case thing.type
+      # ---- Health ----
+      when 2011 then player.add_health(10)                          # stimpack
+      when 2012 then player.add_health(25)                          # medikit
+      when 2013 then player.add_health(100, max: 200)               # soulsphere
+      when 2014 then player.add_health(1,   max: 200)               # health bonus
+
+      # ---- Armor ----
+      when 2018 then player.pickup_armor_pack(100, type: :green)    # green armor
+      when 2019 then player.pickup_armor_pack(200, type: :blue)     # blue armor
+      when 2015 then player.add_armor(1, max: 200)                  # armor bonus
+
+      # ---- Ammo ----
+      when 2007 then player.add_ammo(:bullet, 10) > 0               # clip
+      when 2048 then player.add_ammo(:bullet, 50) > 0               # box of bullets
+      when 2008 then player.add_ammo(:shell,   4) > 0               # 4 shells
+      when 2049 then player.add_ammo(:shell,  20) > 0               # box of shells
+      when 2046 then player.add_ammo(:rocket,  5) > 0               # box of rockets
+      when    8 then player.pickup_backpack                         # backpack
+      else
+        false
+      end
+    end
+
+    def pickup?(doomednum)
+      PICKUP_DOOMEDNUMS.include?(doomednum)
+    end
+
+    PICKUP_DOOMEDNUMS = [
+      2011, 2012, 2013, 2014,             # health
+      2018, 2019, 2015,                   # armor
+      2007, 2048, 2008, 2049, 2046, 8,    # ammo + backpack
+    ].freeze
+  end
+end

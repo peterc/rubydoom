@@ -104,6 +104,7 @@ module Rubydoom
       @scrollers  = WallScrollers.new(@map)
       @sector_lights  = SectorLights.new(@map)
       @sector_effects = SectorEffects.new(@clipper)
+      @pickups        = Pickups.new(@map)
       @player     = Player.from_thing(@map.player_start)
       @automap    = Automap.new(@map, bsp: @bsp)
       sky         = Sky.for_map(map_name, @textures)
@@ -160,6 +161,7 @@ module Rubydoom
       @scrollers.update_tic
       @sector_lights.update_tic
       @sector_effects.update_tic(@player)
+      @pickups.update_tic(@player)
       @flats.update_tic
       @textures.update_tic
       @hud.update_tic(@player)

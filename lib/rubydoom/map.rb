@@ -11,7 +11,7 @@ module Rubydoom
 
     Vertex = Struct.new(:x, :y)
 
-    Thing = Struct.new(:x, :y, :angle, :type, :flags)
+    Thing = Struct.new(:x, :y, :angle, :type, :flags, :removed)
 
     LineDef = Struct.new(
       :start_vertex_index, :end_vertex_index,

@@ -24,6 +24,7 @@ require_relative "rubydoom/switches"
 require_relative "rubydoom/wall_scrollers"
 require_relative "rubydoom/sector_lights"
 require_relative "rubydoom/sector_effects"
+require_relative "rubydoom/pickups"
 require_relative "rubydoom/player"
 require_relative "rubydoom/face"
 

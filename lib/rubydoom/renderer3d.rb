@@ -192,6 +192,7 @@ module Rubydoom
       return [] unless @sprites
       out = []
       @map.things.each do |thing|
+        next if thing.removed
         info = ThingTypes[thing.type]
         next unless info
         frame = @sprites.frame_for(info.sprite, info.frame)
