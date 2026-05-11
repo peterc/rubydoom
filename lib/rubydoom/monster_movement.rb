@@ -46,10 +46,11 @@ module Rubydoom
       [-1, -1] => DI_SW,
     }.freeze
 
-    def initialize(map, clipper, combat)
+    def initialize(map, clipper, combat, rng: Random.new)
       @map     = map
       @clipper = clipper
       @combat  = combat
+      @rng     = rng
     end
 
     # Try to take one step in `mobj.move_dir`. Returns true if the step
@@ -107,7 +108,7 @@ module Rubydoom
         else
           [d2, d1]
         end
-      ordered = [ordered[1], ordered[0]] if rand(2).zero?  # vanilla coin-flip
+      ordered = [ordered[1], ordered[0]] if @rng.rand(2).zero?  # vanilla coin-flip
       ordered.each do |dir|
         next if dir == DI_NODIR
         next if dir == turn_around
@@ -117,7 +118,7 @@ module Rubydoom
 
       # Side-step search: walk along all 8 dirs as fallbacks.
       dirs = (0..7).to_a
-      dirs.shuffle!  # vanilla picks one of two orderings; full shuffle is fine
+      dirs.shuffle!(random: @rng)  # vanilla picks one of two orderings; full shuffle is fine
       dirs.each do |dir|
         next if dir == turn_around
         mobj.move_dir = dir

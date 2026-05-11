@@ -32,10 +32,10 @@ module Rubydoom
     # Per-sector light-state record. `kind` picks the tic transition.
     Light = Struct.new(:sector, :kind, :max, :min, :state, :count)
 
-    def initialize(map)
+    def initialize(map, rng: Random.new)
       @map     = map
       @lights  = []
-      @rng     = Random.new
+      @rng     = rng
       @neighbors_cache = nil
       collect_lights
     end

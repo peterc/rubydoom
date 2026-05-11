@@ -40,14 +40,14 @@ module Rubydoom
     DEAD_LUMP = "STFDEAD0"
     GOD_LUMP  = "STFGOD0"
 
-    def initialize
+    def initialize(rng: Random.new)
       @tics_left          = 0
       @direction          = 0
       @ouch_left          = 0
       @evilgrin_left      = 0
       @prev_health        = nil
       @prev_weapons_count = nil
-      @random             = Random.new
+      @random             = rng
     end
 
     def update_tic(player)

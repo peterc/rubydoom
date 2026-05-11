@@ -38,6 +38,7 @@ require_relative "rubydoom/projectiles"
 require_relative "rubydoom/weapons"
 require_relative "rubydoom/face"
 require_relative "rubydoom/input"
+require_relative "rubydoom/demo"
 require_relative "rubydoom/game"
 
 # Gosu-dependent layers. Loaded last so non-graphical tools (asset dumps,
@@ -49,4 +50,5 @@ require_relative "rubydoom/hud"
 require_relative "rubydoom/automap"
 require_relative "rubydoom/renderer3d"
 require_relative "rubydoom/wipe"
+require_relative "rubydoom/headless_runner"
 require_relative "rubydoom/app"

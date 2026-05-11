@@ -88,6 +88,11 @@ module Rubydoom
     VisSprite = Struct.new(:cam_z, :cam_x, :pic, :mirrored, :thing,
                            keyword_init: true)
 
+    # Exposed for headless benchmarks: after a draw(present: false) the
+    # pure-Ruby RGBA buffer is reachable here so callers can shasum it
+    # without going through Gosu.
+    attr_reader :framebuffer
+
     def initialize(map, bsp, textures: nil, flats: nil, palette: nil,
                    colormap: nil, sky: nil, sprites: nil)
       @map      = map
@@ -102,6 +107,7 @@ module Rubydoom
       # frame is ~163KB of String per tick — the dominant GC source
       # before pooling. We just clear() in place at the top of draw().
       @fb         = Framebuffer.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT)
+      @framebuffer = @fb  # public alias for headless callers
       # Same idea for the per-column clipping arrays and the drawseg /
       # masked-seg lists. These were small but allocated every frame;
       # reusing them takes another bite out of GC.
@@ -117,7 +123,11 @@ module Rubydoom
       @row_spans   = Array.new(PLAYFIELD_HEIGHT) { [] }
     end
 
-    def draw(player)
+    # `present: false` runs everything except the final GPU upload —
+    # used by the headless benchmark so we measure Ruby work alone
+    # (no GL context, no Gosu::Image allocation, no vsync). The pixel
+    # buffer is still fully written; reach it via `#framebuffer`.
+    def draw(player, present: true)
       fb = @fb
       @player_angle_deg = player.angle
       # Sky pre-fill on the upper half: anything ceiling-visplane-shaped
@@ -168,7 +178,7 @@ module Rubydoom
       draw_visplanes(fb, visplanes, eye_y, player, cos_a, sin_a)
       draw_masked(fb, player, cos_a, sin_a, eye_y)
 
-      fb.to_gosu_image.draw(0, 0, Z)
+      fb.to_gosu_image.draw(0, 0, Z) if present
     end
 
     private

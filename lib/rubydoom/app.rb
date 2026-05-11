@@ -50,26 +50,74 @@ module Rubydoom
       @dump_frame_to = dump_frame_to
       @show_automap  = show_automap
       @automap_mode  = automap_mode
-      # Skill: CLI / kwarg, else env override, else vanilla default
-      # (Hurt Me Plenty = 2). Range 0..4 — see Map::SKILL_DEFAULT.
-      skill_level = (ENV["RUBYDOOM_SKILL"]&.to_i || skill || Map::SKILL_DEFAULT).to_i
+
+      # Demo playback (RUBYDOOM_PLAY=path.rdm): the file's header decides
+      # the map, skill, and seed — anything passed in is ignored so the
+      # replay is faithful. RUBYDOOM_RECORD=path.rdm captures live input
+      # to disk each tic. Mutually exclusive.
+      @demo_player   = ENV["RUBYDOOM_PLAY"]   ? Demo::Player.new(ENV["RUBYDOOM_PLAY"]) : nil
+      @demo_path     = ENV["RUBYDOOM_RECORD"]
+      @demo_recorder = nil  # opened after we know the resolved skill/seed/map
+
+      if @demo_player
+        skill_level = @demo_player.header.skill
+        seed        = @demo_player.header.seed
+        map_name    = @demo_player.header.map_name
+      else
+        # Skill: CLI / kwarg, else env override, else vanilla default
+        # (Hurt Me Plenty = 2). Range 0..4 — see Map::SKILL_DEFAULT.
+        skill_level = (ENV["RUBYDOOM_SKILL"]&.to_i || skill || Map::SKILL_DEFAULT).to_i
+        seed        = ENV["RUBYDOOM_SEED"]&.to_i
+      end
+
       super(SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale,
             update_interval: 1000.0 / Game::TIC_RATE,
             resizable: true)
 
       wad    = WAD.open(wad_path)
-      @sound = Sound.new(wad)
-      @game  = Game.new(wad: wad, sound: @sound, skill: skill_level)
+      # Mute sound effects during demo playback — playback wants a
+      # deterministic, side-effect-free run. Live recording keeps audio.
+      @sound = @demo_player ? nil : Sound.new(wad)
+      # RUBYDOOM_SEED makes the whole sim deterministic — required for
+      # the demo-record/playback benchmark to produce stable shasums.
+      # Absent: fresh Random (vanilla "different every launch") behavior.
+      # During playback the seed comes from the demo header instead.
+      @seed  = seed
+      @rng   = @seed ? Random.new(@seed) : Random.new
+      @game  = Game.new(wad: wad, sound: @sound, skill: skill_level, rng: @rng)
 
       # HUD needs the Gosu-backed image cache, which needs Game's
       # parsed graphics. Build the Gosu side now, hand the HUD to Game
       # before the first load_map so the tick can include it. We keep
       # the image cache around for non-HUD draws too (title screen).
       @images  = GosuImageCache.new(@game.graphics)
-      @hud     = HUD.new(@images)
+      @hud     = HUD.new(@images, face: Face.new(rng: @rng))
       @game.hud = @hud
 
       load_map(map_name)
+
+      # Open the recorder now that skill/seed/map are resolved. Recording
+      # without a known seed is allowed but the demo won't replay
+      # deterministically — emit one if missing so future-us can find out.
+      if @demo_path
+        rec_seed = @seed || Random.new_seed & 0xFFFFFFFFFFFFFFFF
+        unless @seed
+          warn "[demo] RUBYDOOM_SEED not set; using fresh seed #{rec_seed}. " \
+               "Replay with RUBYDOOM_SEED=#{rec_seed} for determinism."
+          @rng = Random.new(rec_seed)
+          # Rebuild Game with the new RNG — we already constructed one
+          # above with an unseeded RNG, so swap. Cheap because load_map
+          # is what materializes the per-map subsystems.
+          @game = Game.new(wad: wad, sound: @sound, skill: skill_level, rng: @rng)
+          @game.hud = @hud
+          load_map(map_name)
+        end
+        @demo_recorder = Demo::Recorder.new(@demo_path,
+                                            skill:    skill_level,
+                                            seed:     rec_seed,
+                                            map_name: map_name)
+        at_exit { @demo_recorder&.close }
+      end
       # Honour debug-spawn env vars on the initial map only; transitions
       # spawn the player at the new map's player_start.
       @game.debug_set_player(
@@ -99,10 +147,11 @@ module Rubydoom
       # Launch sequence: show TITLEPIC for TITLE_HOLD_TICS, then melt
       # it into the first map. While the title is up, @title_tics_left
       # > 0 and the simulation is paused; any button press collapses
-      # the timer to 0 so the wipe kicks off immediately. Skipped under
-      # dump mode (the dump path bypasses update and we want a clean
-      # gameplay frame).
-      @title_tics_left = @dump_frame_to ? 0 : TITLE_HOLD_TICS
+      # the timer to 0 so the wipe kicks off immediately. Skipped for
+      # dump mode and demo playback — those want gameplay frames from
+      # tic 0.
+      @title_tics_left =
+        (@dump_frame_to || @demo_player) ? 0 : TITLE_HOLD_TICS
     end
 
     # Load a new map: delegate the simulation work to Game, then
@@ -172,8 +221,28 @@ module Rubydoom
         @wipe = nil if @wipe.done?
         return
       end
-      @game.tick(build_input)
+
+      input = consume_input
+      return unless input  # demo ended (handled inside consume_input)
+      @game.tick(input)
       announce_exit_if_pending
+    end
+
+    # One tic's worth of input. In playback mode, read the next recorded
+    # tic and close out cleanly at EOF. Otherwise sample Gosu and (if a
+    # recorder is open) tee the result to disk before handing back.
+    def consume_input
+      if @demo_player
+        if @demo_player.end_of_file?
+          @demo_player.close
+          close
+          return nil
+        end
+        return @demo_player.next_input
+      end
+      input = build_input
+      @demo_recorder << input if @demo_recorder
+      input
     end
 
     def start_launch_wipe

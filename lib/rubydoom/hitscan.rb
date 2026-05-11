@@ -25,7 +25,7 @@ module Rubydoom
   class Hitscan
     DEFAULT_RANGE = 2048.0  # 32 * 64 == MISSILERANGE in vanilla.
 
-    def initialize(map, clipper, sight: nil)
+    def initialize(map, clipper, sight: nil, rng: Random.new)
       @map     = map
       @clipper = clipper
       # Sight runs the proper slope-aware opening check used for AI
@@ -33,6 +33,7 @@ module Rubydoom
       # ledge (whose step-up bottom is above the player's flat eye)
       # still qualifies.
       @sight   = sight || Sight.new(map, clipper)
+      @rng     = rng
     end
 
     # Cast a ray from the player at their facing angle + an optional
@@ -41,7 +42,7 @@ module Rubydoom
     # wall-only checks. The nearest of (wall, any shootable) wins.
     def fire(player, range: DEFAULT_RANGE, spread_deg: 0.0, shootables: nil)
       ang = player.angle
-      ang += (rand - 0.5) * 2 * spread_deg unless spread_deg.zero?
+      ang += (@rng.rand - 0.5) * 2 * spread_deg unless spread_deg.zero?
       rad = ang * Math::PI / 180.0
       dx  = Math.cos(rad)
       dy  = Math.sin(rad)

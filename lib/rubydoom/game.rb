@@ -54,10 +54,15 @@ module Rubydoom
                 :player
     attr_accessor :hud
 
-    def initialize(wad:, sound: nil, skill: Map::SKILL_DEFAULT)
+    def initialize(wad:, sound: nil, skill: Map::SKILL_DEFAULT, rng: Random.new)
       @wad   = wad
       @sound = sound
       @skill = skill
+      # One RNG shared across every per-map sim subsystem. With a seed
+      # (RUBYDOOM_SEED), the entire simulation is reproducible — that's
+      # the contract the demo-playback benchmark relies on. Tests that
+      # want isolation pass their own rng directly to a subsystem.
+      @rng   = rng
 
       # Asset state — palette, colormap, textures/flats/sprites caches —
       # persists across maps. Texture and flat animation phase carries
@@ -96,7 +101,7 @@ module Rubydoom
       @switches.sound  = @sound
       @plats.sound = @sound
       @scrollers  = WallScrollers.new(@map)
-      @sector_lights  = SectorLights.new(@map)
+      @sector_lights  = SectorLights.new(@map, rng: @rng)
       @sector_effects = SectorEffects.new(@clipper)
       @pickups        = Pickups.new(@map)
       @pickups.sound  = @sound
@@ -111,19 +116,21 @@ module Rubydoom
       @doors.listener    = @player
       @switches.listener = @player
       @plats.listener    = @player
-      @combat     = Combat.new(@map, sound: @sound)
+      @combat     = Combat.new(@map, sound: @sound, rng: @rng)
       @sight      = Sight.new(@map, @clipper)
-      @monster_movement = MonsterMovement.new(@map, @clipper, @combat)
+      @monster_movement = MonsterMovement.new(@map, @clipper, @combat, rng: @rng)
       @monster_ai = MonsterAI.new(@map, @combat, @sight, @monster_movement,
-                                  sound: @sound, noise_alert: @noise_alert)
+                                  sound: @sound, noise_alert: @noise_alert,
+                                  rng: @rng)
       @monster_ai.clipper = @clipper
       @combat.ai  = @monster_ai
       @projectiles = Projectiles.new(@map, @sight, @clipper, @combat,
-                                     sound: @sound)
+                                     sound: @sound, rng: @rng)
       @monster_ai.projectiles = @projectiles
-      @hitscan    = Hitscan.new(@map, @clipper)
+      @hitscan    = Hitscan.new(@map, @clipper, rng: @rng)
       @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat,
-                                sound: @sound, noise_alert: @noise_alert)
+                                sound: @sound, noise_alert: @noise_alert,
+                                rng: @rng)
       @weapons.clipper = @clipper
       @hud.weapons = @weapons if @hud
 

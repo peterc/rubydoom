@@ -23,6 +23,16 @@ unless File.exist?(wad_path)
   abort "WAD not found at #{wad_path} — pass a path as the first arg"
 end
 
+# Benchmark mode bypasses Gosu entirely. RUBYDOOM_PLAY is required —
+# without it we'd have no input source for a deterministic run.
+if ENV["RUBYDOOM_BENCHMARK"]
+  demo_path = ENV["RUBYDOOM_PLAY"] or abort \
+    "RUBYDOOM_BENCHMARK requires RUBYDOOM_PLAY=path.rdm (record one first " \
+    "with RUBYDOOM_RECORD=path.rdm RUBYDOOM_SEED=N bin/rubydoom)"
+  Rubydoom::HeadlessRunner.new(wad_path: wad_path, demo_path: demo_path).run
+  exit
+end
+
 Rubydoom::App.new(
   wad_path: wad_path,
   map_name: map_name,

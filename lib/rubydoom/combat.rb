@@ -53,9 +53,10 @@ module Rubydoom
     # No-direction sentinel matching vanilla DI_NODIR.
     DI_NODIR = 8
 
-    def initialize(map, sound: nil)
+    def initialize(map, sound: nil, rng: Random.new)
       @map   = map
       @sound = sound
+      @rng   = rng
       @mobjs = []
       # Identity-keyed: Thing is a Struct, and Struct.hash is value-based,
       # so when the renderer/AI mutates a thing's sprite_override or
@@ -128,7 +129,7 @@ module Rubydoom
 
       # Roll pain — pain_chance is out of 256. We bail out if the mobj
       # is already in the pain sequence (vanilla's MF_JUSTHIT logic).
-      if rand(256) < mobj.info.pain_chance && mobj.info.pain_state
+      if @rng.rand(256) < mobj.info.pain_chance && mobj.info.pain_state
         enter_state(mobj, mobj.info.pain_state)
       end
     end
