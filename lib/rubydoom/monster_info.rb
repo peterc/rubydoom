@@ -3,8 +3,7 @@ module Rubydoom
   # We carry only what the AI/combat code touches — health, collision
   # radius/height, movement speed, pain-on-hit chance, the entry-point
   # state names for the major behaviour transitions, and the per-attack
-  # sound effect (folded in here even though we don't play sounds yet —
-  # the field reserves a place for them).
+  # sound effect.
   #
   # `reaction_time` is the initial tic delay before A_Look will react to
   # a sighted player — vanilla 8 for everything in E1. `pain_chance` is
@@ -56,10 +55,8 @@ module Rubydoom
         active_sound: :bgact,
         flags: FLAG_COUNTKILL,
       ),
-      # Imp (TROO) — health 60, melee claw + (vanilla) fireball missile.
-      # We have no projectile system yet, so the missile state runs the
-      # animation but doesn't actually spawn a fireball; the imp instead
-      # falls back to its claw if the player is in melee range.
+      # Imp (TROO) — health 60. Claws in melee range, throws a fireball
+      # (MT_TROOPSHOT) at distance via the Projectiles system.
       Info.new(
         doomednum: 3001, health: 60, radius: 20, height: 56,
         speed: 8, pain_chance: 200, reaction_time: 8,

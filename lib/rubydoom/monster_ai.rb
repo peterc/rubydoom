@@ -10,11 +10,8 @@ module Rubydoom
   #
   #   * Targeting is single-player only (vanilla picks among 4 players
   #     in deathmatch).
-  #   * Sound propagation (P_NoiseAlert) isn't wired yet; A_Look only
-  #     wakes monsters on direct sight of the player.
-  #   * Imp fireball missile uses melee instead (we have no projectile
-  #     system) — TROO_ATK still plays its three-frame animation but the
-  #     damage application is the same melee-claw logic as the demon.
+  #   * No infighting — a hit-by-monster never retargets to that
+  #     monster, only to a player.
   class MonsterAI
     # Sight range from p_enemy.c. Vanilla doesn't actually clamp by
     # range — A_Look only checks the sight ray. We use a generous cap to
@@ -52,15 +49,21 @@ module Rubydoom
     }.freeze
 
     def initialize(map, combat, sight, movement, sound: nil,
-                   noise_alert: nil, rng: Random.new)
+                   noise_alert: nil, projectiles: nil, rng: Random.new)
       @map         = map
       @combat      = combat
       @sight       = sight
       @movement    = movement
       @sound       = sound
       @noise_alert = noise_alert
+      @projectiles = projectiles
       @rng         = rng
     end
+
+    # Late-bind: App wires the Projectiles system after this AI is
+    # constructed so the system's @combat ref can already point at the
+    # finished Combat.
+    attr_writer :projectiles
 
     def run_action(symbol, mobj, player)
       method_name = ACTIONS[symbol]
@@ -299,17 +302,23 @@ module Rubydoom
 
     # ---------- A_TroopAttack / A_SargAttack ----------
 
-    # Imp: vanilla swipes for `(rand%8+1)*3` if in melee, else throws a
-    # fireball. We don't have projectiles, so out-of-melee imps just
-    # play the animation and miss.
+    # Imp: vanilla swipes for `(rand%8+1)*3` if in melee range, else
+    # throws a fireball. Vanilla A_TroopAttack plays the bite sound only
+    # on the melee hit and `sfx_firsht` (via P_SpawnMissile) on the
+    # fireball; we keep that split — the claw sample comes through
+    # play_attack_sound here, the firsht plays inside spawn_imp_fireball.
     def a_troo_attack(mobj, player)
       return unless mobj.target
-      play_attack_sound(mobj, player)
       if approx_dist(mobj, player.x, player.y) <= MELEE_RANGE + 20
+        play_attack_sound(mobj, player)
         damage = (1 + @rng.rand(8)) * 3
         player.take_damage(damage)
+        return
       end
-      # else: would spawn a TROO fireball. No-op for now.
+      # Out of melee — throw a fireball. If the projectile system isn't
+      # wired (older test setups), fall back to the previous no-op so the
+      # state machine still completes.
+      @projectiles&.spawn_imp_fireball(mobj, player, listener: player)
     end
 
     # Demon: bite for melee damage when in range.

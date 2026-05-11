@@ -252,7 +252,9 @@ module Rubydoom
 
     def draw_billboard(fb, pic, mirrored, cam_x, cam_z, thing, eye_y)
       sector  = sector_at(thing.x, thing.y)
-      thing_z = sector.floor_height
+      # Most things sit on the floor; projectiles supply an absolute
+      # z via z_override so they render at the height they're flying at.
+      thing_z = thing.z_override || sector.floor_height
       light   = sector.light_level
 
       scale     = FOCAL_LENGTH / cam_z

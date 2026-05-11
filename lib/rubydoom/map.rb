@@ -12,11 +12,15 @@ module Rubydoom
     Vertex = Struct.new(:x, :y)
 
     # Things start out with their ThingTypes-default sprite/frame and
-    # solidity. The three `*_override` fields let runtime systems
-    # (Combat death sequences, scripted state changes) replace those
-    # without touching ThingTypes. nil = use default; non-nil wins.
+    # solidity. The override fields let runtime systems (Combat death
+    # sequences, scripted state changes, in-flight projectiles) replace
+    # those without touching ThingTypes. nil = use default; non-nil wins.
+    # `z_override` lifts the sprite off the sector floor — used by
+    # projectiles so a fireball renders at chest height as it flies
+    # rather than slithering along the ground.
     Thing = Struct.new(:x, :y, :angle, :type, :flags, :removed,
-                       :sprite_override, :frame_override, :solid_override)
+                       :sprite_override, :frame_override, :solid_override,
+                       :z_override)
 
     LineDef = Struct.new(
       :start_vertex_index, :end_vertex_index,

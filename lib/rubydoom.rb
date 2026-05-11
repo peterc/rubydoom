@@ -34,6 +34,7 @@ require_relative "rubydoom/monster_movement"
 require_relative "rubydoom/noise_alert"
 require_relative "rubydoom/combat"
 require_relative "rubydoom/monster_ai"
+require_relative "rubydoom/projectiles"
 require_relative "rubydoom/weapons"
 require_relative "rubydoom/face"
 

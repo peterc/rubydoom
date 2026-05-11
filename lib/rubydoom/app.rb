@@ -135,6 +135,9 @@ module Rubydoom
                                   sound: @sound, noise_alert: @noise_alert)
       @monster_ai.clipper = @clipper
       @combat.ai  = @monster_ai
+      @projectiles = Projectiles.new(@map, @sight, @clipper, @combat,
+                                     sound: @sound)
+      @monster_ai.projectiles = @projectiles
       @hitscan    = Hitscan.new(@map, @clipper)
       @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat,
                                 sound: @sound, noise_alert: @noise_alert)
@@ -205,6 +208,7 @@ module Rubydoom
       handle_fire_button
       @weapons.update_tic(@player)
       @combat.update_tic(@player)
+      @projectiles.update_tic(@player)
       handle_player_pain_sound
       @flats.update_tic
       @textures.update_tic
