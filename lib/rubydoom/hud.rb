@@ -71,7 +71,7 @@ module Rubydoom
     attr_writer :weapons
 
     def update_tic(player)
-      @face.update_tic(player.health)
+      @face.update_tic(player)
     end
 
     def draw(player)
@@ -114,7 +114,7 @@ module Rubydoom
       draw_ammo_panel(player)
       draw_keys(player)
 
-      @images[@face.lump_name(player.health)].draw_anchored(FACE_X, FACE_Y, Z_STATUS_BAR_FG)
+      @images[@face.lump_name(player)].draw_anchored(FACE_X, FACE_Y, Z_STATUS_BAR_FG)
     end
 
     def draw_keys(player)
