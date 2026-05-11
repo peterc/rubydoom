@@ -84,6 +84,26 @@ module Rubydoom
     attr_reader :name, :things, :linedefs, :sidedefs, :vertexes,
                 :segs, :subsectors, :nodes, :sectors
 
+    # Vanilla DOOM doesn't store level ordering in the WAD — the
+    # next-map table is hardcoded in `g_game.c`. We approximate by
+    # walking the lump directory forward from the current map's
+    # marker and returning the next lump whose name matches the
+    # ExMy / MAPxx pattern. This happens to match the vanilla
+    # progression for the stock IWADs because the maps are stored
+    # in order; for custom WADs with branching (secret exits) or
+    # out-of-order maps it'll do the wrong thing.
+    MAP_NAME_PATTERN = /\A(E\dM\d|MAP\d\d)\z/
+
+    def self.next_in_wad(wad, current_name)
+      idx = wad.lumps.index { |l| l.name == current_name.upcase }
+      return nil unless idx
+      ((idx + 1)...wad.lumps.size).each do |i|
+        name = wad.lumps[i].name
+        return name if MAP_NAME_PATTERN.match?(name)
+      end
+      nil
+    end
+
     def self.load(wad, name)
       marker_index = wad.lumps.index { |l| l.name == name.upcase }
       raise "WAD has no map marker #{name.inspect}" unless marker_index

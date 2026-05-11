@@ -52,39 +52,24 @@ module Rubydoom
       super(SCREEN_WIDTH * scale, SCREEN_HEIGHT * scale,
             update_interval: 1000.0 / TIC_RATE,
             resizable: true)
-      self.caption = "rubydoom — #{map_name}"
+      @wad      = WAD.open(wad_path)
+      @palette  = Palette.from_wad(@wad)
+      @colormap = Colormap.from_wad(@wad, @palette)
+      graphics  = Graphics.new(@wad, @palette)
+      @textures = AnimatedTextures.new(Textures.new(@wad, @palette, graphics))
+      @sprites  = Sprites.new(@wad)
+      @flats    = AnimatedFlats.new(Flats.new(@wad))
+      images    = GosuImageCache.new(graphics)
+      @hud      = HUD.new(images)
+      @state    = GameState.default
 
-      wad      = WAD.open(wad_path)
-      palette  = Palette.from_wad(wad)
-      colormap = Colormap.from_wad(wad, palette)
-      graphics = Graphics.new(wad, palette)
-      @textures = AnimatedTextures.new(Textures.new(wad, palette, graphics))
-      sprites   = Sprites.new(wad)
-      @flats   = AnimatedFlats.new(Flats.new(wad))
-      images   = GosuImageCache.new(graphics)
-
-      @map        = Map.load(wad, map_name)
-      @bsp        = Bsp.new(@map.nodes)
-      @clipper    = Clipper.new(@map, @bsp)
-      @doors      = Doors.new(@map)
-      @plats      = Plats.new(@map)
-      @floors     = Floors.new(@map)
-      @switches   = Switches.new(@map)
-      @scrollers  = WallScrollers.new(@map)
-      @clipper.on_cross = method(:handle_walk_cross)
-      @exit_announced = false
-      @player     = Player.from_thing(@map.player_start)
+      load_map(map_name)
+      # Honour debug-spawn env vars on the initial map only; transitions
+      # spawn the player at the new map's player_start.
       @player.x     = ENV["RUBYDOOM_X"].to_f     if ENV["RUBYDOOM_X"]
       @player.y     = ENV["RUBYDOOM_Y"].to_f     if ENV["RUBYDOOM_Y"]
       @player.angle = ENV["RUBYDOOM_ANGLE"].to_f if ENV["RUBYDOOM_ANGLE"]
-      @hud        = HUD.new(images)
-      @automap    = Automap.new(@map, bsp: @bsp)
-      sky         = Sky.for_map(map_name, @textures)
-      @renderer3d = Renderer3D.new(@map, @bsp,
-                                   textures: @textures, flats: @flats,
-                                   palette: palette, colormap: colormap,
-                                   sky: sky, sprites: sprites)
-      @state      = GameState.default
+      @last_floor_z = @clipper.floor_at(@player.x, @player.y)
 
       # Skip the first frame's mouse delta — cursor starts wherever the OS
       # left it, so the recenter would otherwise cause a sudden yaw jump.
@@ -99,8 +84,33 @@ module Rubydoom
       @bob_phase = 0.0
       @bob_amp   = 0.0
 
-      @last_floor_z      = @clipper.floor_at(@player.x, @player.y)
       @delta_view_height = 0.0
+    end
+
+    # Build (or rebuild) every per-map subsystem. Asset state — palette,
+    # colormap, textures/flats/sprites caches, the gosu image cache, the
+    # HUD, GameState — persists across maps. Texture and flat animation
+    # phase carries over too, which feels right (the slime flow doesn't
+    # snap on a level change).
+    def load_map(map_name)
+      self.caption = "rubydoom — #{map_name}"
+      @map        = Map.load(@wad, map_name)
+      @bsp        = Bsp.new(@map.nodes)
+      @clipper    = Clipper.new(@map, @bsp)
+      @clipper.on_cross = method(:handle_walk_cross)
+      @doors      = Doors.new(@map)
+      @plats      = Plats.new(@map)
+      @floors     = Floors.new(@map)
+      @switches   = Switches.new(@map)
+      @scrollers  = WallScrollers.new(@map)
+      @player     = Player.from_thing(@map.player_start)
+      @automap    = Automap.new(@map, bsp: @bsp)
+      sky         = Sky.for_map(map_name, @textures)
+      @renderer3d = Renderer3D.new(@map, @bsp,
+                                   textures: @textures, flats: @flats,
+                                   palette: @palette, colormap: @colormap,
+                                   sky: sky, sprites: @sprites)
+      @exit_announced = false
     end
 
     def needs_cursor?
@@ -201,11 +211,25 @@ module Rubydoom
       end
     end
 
+    # On exit-switch fire, jump straight to whichever map's marker
+    # lump comes next in the WAD directory (no intermission yet).
+    # For doom1.wad the lumps happen to be stored in vanilla play
+    # order, so this matches the intended progression; custom WADs
+    # may sequence differently.
     def announce_exit_if_pending
       return if @exit_announced
       return unless @switches.exit_requested
-      puts "[exit] level complete — #{@map.name}"
       @exit_announced = true
+      next_name = Map.next_in_wad(@wad, @map.name)
+      if next_name
+        puts "[exit] #{@map.name} → #{next_name}"
+        load_map(next_name)
+        @last_floor_z      = @clipper.floor_at(@player.x, @player.y)
+        @delta_view_height = 0.0
+        @player.view_height = NOMINAL_VIEW_HEIGHT.to_f
+      else
+        puts "[exit] no further map after #{@map.name}"
+      end
     end
 
     def render_scene
