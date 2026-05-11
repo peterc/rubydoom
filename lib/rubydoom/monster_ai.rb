@@ -186,16 +186,27 @@ module Rubydoom
       # this here, but it stabilises the attack-rolling).
       dist = approx_dist(mobj, target.x, target.y)
 
+      # Vanilla P_CheckMeleeRange / P_CheckMissileRange both gate on
+      # P_CheckSight to the target. Without that the monster fires
+      # (and plays its loud attack sound) blind through walls — the
+      # source of the "ghost shots from behind a closed door" report.
+      # We cache the sight result so we only ask once per chase tic.
+      target_in_sight = nil
+
       if mobj.info.melee_state && dist <= MELEE_RANGE
-        @combat.enter_state(mobj, mobj.info.melee_state)
-        return
+        target_in_sight = can_see_player?(mobj, target)
+        if target_in_sight
+          @combat.enter_state(mobj, mobj.info.melee_state)
+          return
+        end
       end
 
       if mobj.info.missile_state && dist <= MISSILE_RANGE
         # Vanilla rolls a missile-chance check based on distance; we
         # use a flat 1-in-4 chance for now to avoid them firing every
-        # tic. Imp/zombie animate, then run their attack action.
-        if @rng.rand(4).zero?
+        # tic. The sight check (vanilla P_CheckMissileRange) must pass.
+        target_in_sight = can_see_player?(mobj, target) if target_in_sight.nil?
+        if target_in_sight && @rng.rand(4).zero?
           @combat.enter_state(mobj, mobj.info.missile_state)
           return
         end
