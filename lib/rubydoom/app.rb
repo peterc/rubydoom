@@ -226,6 +226,14 @@ module Rubydoom
     end
 
     def button_down(id)
+      # God-mode toggle (IDDQD equivalent). Handled before the dead-
+      # check so a fatal hit doesn't lock the player out of toggling
+      # back on; pressing it while dead also heals back to 100.
+      if id == Gosu::KB_G
+        on = @player.toggle_god!
+        puts "[god mode] #{on ? "ON" : "OFF"}"
+        return
+      end
       # While dead, only Esc / mouse-capture / Use / Fire are honoured.
       # Use / Fire respawn. Everything else (movement, weapon switch,
       # debug shortcuts) is suppressed so the dead state is sticky

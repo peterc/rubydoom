@@ -53,7 +53,8 @@ module Rubydoom
                       :secrets_found,
                       :keys,
                       :weapons_owned,
-                      :pending_weapon) do
+                      :pending_weapon,
+                      :god_mode) do
     DEFAULT_MAX_HEALTH = 100
     SOULSPHERE_MAX     = 200
     DEFAULT_MAX_ARMOR  = 200
@@ -110,7 +111,8 @@ module Rubydoom
           0,
           empty_keys,
           DEFAULT_WEAPONS.dup,
-          nil)
+          nil,
+          false)
     end
 
     # Fresh key inventory: no colour, no variant.
@@ -168,6 +170,15 @@ module Rubydoom
       health <= 0
     end
 
+    # IDDQD-style god mode toggle. Turning it on heals to full health
+    # if needed (vanilla refills HP to 100, doesn't touch armor/ammo).
+    # Returns the new state for the caller to display.
+    def toggle_god!
+      self.god_mode = !god_mode
+      self.health = DEFAULT_MAX_HEALTH if god_mode && health < DEFAULT_MAX_HEALTH
+      god_mode
+    end
+
     # Reset back to pistol-start state. Used on respawn — vanilla
     # single-player restarts the level entirely; we just bring the
     # player back at their last known map_start with default stats
@@ -208,9 +219,12 @@ module Rubydoom
 
     # Apply damage. Armor absorbs a fraction first — 1/3 for green,
     # 1/2 for blue (vanilla P_DamageMobj). Once armor is exhausted
-    # its class is cleared. Health clamps at 0.
+    # its class is cleared. Health clamps at 0. God mode (vanilla
+    # IDDQD) short-circuits the whole path so no armor or health is
+    # ever spent.
     def take_damage(amount)
       return if amount <= 0
+      return if god_mode
       if armor.positive? && armor_class
         frac  = (armor_class == :blue) ? 0.5 : (1.0 / 3.0)
         saved = (amount * frac).to_i
