@@ -31,7 +31,14 @@ module Rubydoom
       @bsp      = bsp
       build_blockmap
       @solid_things = collect_solid_things
+      @on_cross = nil
     end
+
+    # Set a callback (taking a linedef) that fires once per walk-trigger
+    # linedef the player crossed during a successful slide(). The
+    # callback's job is to dispatch the special and (for W1 once-only
+    # triggers) clear its special_type so it doesn't fire again.
+    attr_writer :on_cross
 
     # Returns [final_x, final_y] after attempting to move from (x0, y0)
     # to (x1, y1). If the full move fails, tries sliding along each axis
@@ -56,12 +63,16 @@ module Rubydoom
       current_floor = floor_at(x0, y0)
       return [x0, y0] if current_floor.nil?
 
-      return [x1, y1] if try_move(x0, y0, current_floor, x1, y1)
-
+      if try_move(x0, y0, current_floor, x1, y1)
+        emit_crossings(x0, y0, x1, y1)
+        return [x1, y1]
+      end
       if dx != 0 && try_move(x0, y0, current_floor, x0 + dx, y0)
+        emit_crossings(x0, y0, x0 + dx, y0)
         return [x0 + dx, y0]
       end
       if dy != 0 && try_move(x0, y0, current_floor, x0, y0 + dy)
+        emit_crossings(x0, y0, x0, y0 + dy)
         return [x0, y0 + dy]
       end
       [x0, y0]
@@ -123,6 +134,42 @@ module Rubydoom
         return true
       end
       false
+    end
+
+    # Walk-trigger emission. Fires @on_cross for each special linedef
+    # the player's center segment crossed (start and end on different
+    # sides AND the line segments actually intersect). Uses the
+    # blockmap to scope the search to nearby linedefs only.
+    def emit_crossings(x0, y0, x1, y1)
+      return unless @on_cross
+      half_dx = (x1 - x0).abs * 0.5
+      half_dy = (y1 - y0).abs * 0.5
+      radius  = half_dx > half_dy ? half_dx : half_dy
+      seen    = nil
+      each_linedef_near((x0 + x1) * 0.5, (y0 + y1) * 0.5, radius + 1) do |ld_index|
+        seen ||= {}
+        next if seen[ld_index]
+        seen[ld_index] = true
+
+        ld = @map.linedefs[ld_index]
+        next if ld.special_type.zero?
+        next unless segments_cross?(x0, y0, x1, y1, ld)
+        @on_cross.call(ld)
+      end
+    end
+
+    # True iff player path (a→b) and linedef (c→d) properly intersect.
+    # Endpoint touches are fine to count as a cross — we err toward
+    # firing rather than missing a trigger that the player skimmed.
+    def segments_cross?(ax, ay, bx, by, ld)
+      c = @map.vertexes[ld.start_vertex_index]
+      d = @map.vertexes[ld.end_vertex_index]
+      d1 = (bx - ax) * (c.y - ay) - (by - ay) * (c.x - ax)
+      d2 = (bx - ax) * (d.y - ay) - (by - ay) * (d.x - ax)
+      d3 = (d.x - c.x) * (ay - c.y) - (d.y - c.y) * (ax - c.x)
+      d4 = (d.x - c.x) * (by - c.y) - (d.y - c.y) * (bx - c.x)
+      ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
     end
 
     def collect_solid_things

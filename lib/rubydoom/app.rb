@@ -67,6 +67,12 @@ module Rubydoom
       @bsp        = Bsp.new(@map.nodes)
       @clipper    = Clipper.new(@map, @bsp)
       @doors      = Doors.new(@map)
+      @plats      = Plats.new(@map)
+      @floors     = Floors.new(@map)
+      @switches   = Switches.new(@map)
+      @scrollers  = WallScrollers.new(@map)
+      @clipper.on_cross = method(:handle_walk_cross)
+      @exit_announced = false
       @player     = Player.from_thing(@map.player_start)
       @player.x     = ENV["RUBYDOOM_X"].to_f     if ENV["RUBYDOOM_X"]
       @player.y     = ENV["RUBYDOOM_Y"].to_f     if ENV["RUBYDOOM_Y"]
@@ -138,9 +144,13 @@ module Rubydoom
       handle_movement
       update_view_height
       @doors.update_tic
+      @plats.update_tic
+      @floors.update_tic
+      @scrollers.update_tic
       @flats.update_tic
       @textures.update_tic
       @hud.update_tic(@state)
+      announce_exit_if_pending
     end
 
     def lose_focus
@@ -160,7 +170,7 @@ module Rubydoom
         capture_mouse unless @captured
       when Gosu::KB_TAB    then @show_automap = !@show_automap
       when Gosu::KB_B      then @automap_mode = (@automap_mode == :bsp ? :lines : :bsp)
-      when Gosu::KB_SPACE  then @doors.try_use(@player)
+      when Gosu::KB_SPACE  then @doors.try_use(@player) || @switches.try_use(@player)
       when Gosu::KB_P
         puts "RUBYDOOM_X=#{@player.x} RUBYDOOM_Y=#{@player.y} RUBYDOOM_ANGLE=#{@player.angle}"
       end
@@ -178,6 +188,25 @@ module Rubydoom
     end
 
     private
+
+    # Walk-trigger dispatch. Clipper calls this for each special
+    # linedef the player crossed in the last successful slide. W1
+    # (once-only) handlers clear special_type so the trigger can't
+    # re-fire; WR handlers leave it intact.
+    def handle_walk_cross(ld)
+      if @plats.handle_cross(ld)
+        # WR — leave special intact.
+      elsif @floors.handle_cross(ld)
+        ld.special_type = 0  # W1 — consumed.
+      end
+    end
+
+    def announce_exit_if_pending
+      return if @exit_announced
+      return unless @switches.exit_requested
+      puts "[exit] level complete — #{@map.name}"
+      @exit_announced = true
+    end
 
     def render_scene
       Gosu.draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, BACKGROUND_FILL, -10)
