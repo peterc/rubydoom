@@ -2,7 +2,7 @@
 
 ![rubydoom running E1M1](docs/screenshot.png)
 
-A pure-Ruby DOOM port for benchmarking purposes. Runs headlessly or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/).
+A pure-Ruby DOOM ~~port~~ clone (it's complicated) for benchmarking purposes. Runs headlessly or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/).
 
 The point of the project is not to be a DOOM implementation to *play*, but to be a **realistic, large workload for benchmarking Ruby implementations and their JIT compilers**.
 
