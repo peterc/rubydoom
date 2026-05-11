@@ -107,6 +107,11 @@ module Rubydoom
       @pickups        = Pickups.new(@map)
       @player     = Player.from_thing(@map.player_start)
       @combat     = Combat.new(@map)
+      @sight      = Sight.new(@map, @clipper)
+      @monster_movement = MonsterMovement.new(@map, @clipper, @combat)
+      @monster_ai = MonsterAI.new(@map, @combat, @sight, @monster_movement)
+      @monster_ai.clipper = @clipper
+      @combat.ai  = @monster_ai
       @hitscan    = Hitscan.new(@map, @clipper)
       @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat)
       @hud.weapons = @weapons

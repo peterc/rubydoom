@@ -86,6 +86,63 @@ module Rubydoom
       [x0, y0]
     end
 
+    # Linedefs touching the bounding box of the segment (x0,y0)->(x1,y1),
+    # yielded as LineDef structs. Used by Sight#visible? for AI ray
+    # tests; the bbox over-list is a few extra checks worst-case, the
+    # per-line t-test filters non-crossings at query time.
+    def each_linedef_in_path(x0, y0, x1, y1)
+      c0 = cell_col(x0); c1 = cell_col(x1)
+      r0 = cell_row(y0); r1 = cell_row(y1)
+      c0, c1 = c1, c0 if c0 > c1
+      r0, r1 = r1, r0 if r0 > r1
+      c0 = 0 if c0 < 0
+      r0 = 0 if r0 < 0
+      c1 = @cols - 1 if c1 >= @cols
+      r1 = @rows - 1 if r1 >= @rows
+      seen = nil
+      (r0..r1).each do |row|
+        (c0..c1).each do |col|
+          @cells[row * @cols + col].each do |ld_index|
+            seen ||= {}
+            next if seen[ld_index]
+            seen[ld_index] = true
+            yield @map.linedefs[ld_index]
+          end
+        end
+      end
+    end
+
+    # Probe whether a thing of `radius` at (x, y) would clip into a
+    # wall / step / closed door. Same wall rules as try_move but
+    # parameterised by radius (the player path uses PLAYER_RADIUS = 16,
+    # monsters have 20-30) and ignores per-thing AABB overlap (that's
+    # done separately by MonsterMovement#position_clear?). Returns
+    # true iff the position is clear.
+    def position_valid?(x, y, current_floor, radius)
+      seen = nil
+      each_linedef_near(x, y, radius) do |ld_index|
+        seen ||= {}
+        next if seen[ld_index]
+        seen[ld_index] = true
+
+        ld = @map.linedefs[ld_index]
+        next unless circle_crosses_linedef?(x, y, radius, ld)
+
+        return false if !ld.two_sided? || ld.impassable?
+
+        front = @map.linedef_front_sector(ld)
+        back  = @map.linedef_back_sector(ld)
+        return false if front.nil? || back.nil?
+
+        opening_top = front.ceiling_height < back.ceiling_height ? front.ceiling_height : back.ceiling_height
+        opening_bot = front.floor_height   > back.floor_height   ? front.floor_height   : back.floor_height
+
+        return false if opening_top - opening_bot < PLAYER_HEIGHT
+        return false if opening_bot - current_floor > MAX_STEP
+      end
+      true
+    end
+
     private
 
     def try_move(start_x, start_y, current_floor, x, y)

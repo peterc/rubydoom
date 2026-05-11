@@ -41,12 +41,17 @@ module Rubydoom
       },
       pistol: {
         idle: "PISGA0",
+        # Each frame's tic count comes from vanilla DOOM states
+        # (S_PISTOL1..4). The trailing PISGA0 idle hold is a refire
+        # cooldown so holding fire doesn't loop a hair faster than
+        # the actual gun does in vanilla.
         fire_seq: [
           ["PISGA0", 4, :fire_pistol],
           ["PISFA0", 1],
           ["PISGB0", 6],
           ["PISGC0", 4],
           ["PISGD0", 5],
+          ["PISGA0", 5],
         ],
         ammo: :bullet,
       },
@@ -61,6 +66,7 @@ module Rubydoom
           ["SHTGC0", 5],
           ["SHTGB0", 5],
           ["SHTGA0", 3],
+          ["SHTGA0", 7],
         ],
         ammo: :shell,
       },
@@ -71,6 +77,7 @@ module Rubydoom
           ["CHGFA0", 1],
           ["CHGGB0", 4, :fire_chaingun],
           ["CHGFB0", 1],
+          ["CHGGA0", 3],
         ],
         ammo: :bullet,
       },

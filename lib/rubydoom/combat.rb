@@ -1,33 +1,34 @@
 module Rubydoom
-  # Per-thing combat state — health, death animation, splash damage.
-  # Currently the only thing it manages is the exploding barrel, but the
-  # shape (per-mobj health + state machine, indexed for lookup, exposes
-  # `shootables` to Hitscan) is what monster AI will plug into.
+  # Per-thing combat state: health, current animation state, the few
+  # AI-only fields (target, move_dir, ...), and the lifecycle that takes
+  # a thing from :alive → :dying → :dead.
   #
-  # On lethal damage the barrel:
-  #   1. immediately stops blocking the player (vanilla clears MF_SOLID
-  #      on death — `thing.solid_override = false`),
-  #   2. starts cycling the BEXP A → E death sprite via the renderer's
-  #      sprite/frame override fields,
-  #   3. deals radius damage to the player and any other live barrels
-  #      within 128 units (chain reactions),
-  #   4. on the last death frame, sets `thing.removed = true` so the
-  #      renderer skips it and the mobj is effectively gone.
+  # Two kinds of mobj live here today:
   #
-  # Damage falloff for the explosion is linear with distance, capped at
-  # the EXPLOSION_MAX_DAMAGE constant. Vanilla DOOM uses a max-axis
-  # `(damage - dist)` formula; the linear version is close enough at
-  # the radii barrels actually reach.
+  #   :barrel — exploding barrel (doomednum 2035). Walks through a
+  #             fixed BEXP A..E death sequence on lethal damage, deals
+  #             splash damage on detonation, chain-reacts to other live
+  #             barrels in range, and `thing.removed = true` on the
+  #             last frame.
+  #
+  #   :monster — POSS / SPOS / TROO / SARG. Driven by the
+  #              `MonsterStates` table; transitions are decided by the
+  #              `MonsterAI` action handlers, which Combat dispatches to
+  #              when a state's `action` symbol fires. On lethal damage
+  #              the mobj's `state_key` is reset to the species' death
+  #              state and the state machine just runs through; the last
+  #              frame has tics = nil so it sits forever (corpse stays
+  #              in the world). MF_SOLID is cleared on death.
+  #
+  # `shootables` exposes the [thing, radius] pairs Hitscan needs.
+  # Monsters in :dying / :dead drop out of that list immediately.
   class Combat
     BARREL_DOOMEDNUM     = 2035
     BARREL_HEALTH        = 20
     EXPLOSION_RADIUS     = 128.0
     EXPLOSION_MAX_DAMAGE = 128
 
-    # Vanilla barrel death frames: BEXP A/B/C 5 tics, D/E 10 tics. The
-    # last two are long enough that the player can register the
-    # explosion visually before it vanishes.
-    DEATH_FRAMES = [
+    BARREL_DEATH_FRAMES = [
       ["BEXP", "A", 5],
       ["BEXP", "B", 5],
       ["BEXP", "C", 5],
@@ -35,95 +36,234 @@ module Rubydoom
       ["BEXP", "E", 10],
     ].freeze
 
-    Mobj = Struct.new(:thing, :health, :state, :frame_index, :frame_timer, :kind)
+    # A unified mobj record. Barrel fields:
+    #   thing, health, state, frame_index, frame_timer, kind
+    # Monster fields additionally use:
+    #   info        — MonsterInfo entry
+    #   state_key   — current MonsterStates row key (symbol)
+    #   target      — Player when the monster has acquired one
+    #   move_dir    — 0..7 cardinal/diagonal index, or 8 (no direction)
+    #   move_count  — tics-since-last-newchasedir; vanilla rerolls at 0
+    #   reaction_time — tics before A_Look will react (set on damage too)
+    Mobj = Struct.new(
+      :thing, :health, :state, :frame_index, :frame_timer, :kind,
+      :info, :state_key, :target, :move_dir, :move_count, :reaction_time,
+    )
+
+    # No-direction sentinel matching vanilla DI_NODIR.
+    DI_NODIR = 8
 
     def initialize(map)
       @map   = map
-      @mobjs = map.things.filter_map do |t|
-        if t.type == BARREL_DOOMEDNUM
-          Mobj.new(t, BARREL_HEALTH, :alive, 0, 0, :barrel)
-        end
+      @mobjs = []
+      @by_thing = {}
+      @ai = nil
+
+      map.things.each do |t|
+        m =
+          if t.type == BARREL_DOOMEDNUM
+            spawn_barrel(t)
+          elsif (info = MonsterInfo[t.type])
+            spawn_monster(t, info)
+          end
+        next unless m
+        @mobjs << m
+        @by_thing[t] = m
       end
-      @by_thing = @mobjs.each_with_object({}) { |m, h| h[m.thing] = m }
     end
 
-    # List of [thing, radius] for hitscan to test against. Only alive
-    # mobjs participate; once a barrel is :dying it's still rendered
-    # (death animation) but no longer absorbs bullets.
+    # The MonsterAI uses Combat as its window into damage / radius
+    # damage / state transitions, and Combat dispatches state-action
+    # symbols to the AI. Wiring is two-way and registered post-init.
+    attr_accessor :ai
+
     def shootables
       out = []
       @mobjs.each do |m|
         next unless m.state == :alive
-        info = ThingTypes[m.thing.type]
-        next unless info
-        out << [m.thing, info.radius]
+        radius = m.info ? m.info.radius : ThingTypes[m.thing.type]&.radius
+        next unless radius
+        out << [m.thing, radius.to_f]
       end
       out
+    end
+
+    def monsters
+      @mobjs.select { |m| m.kind == :monster }
     end
 
     def mobj_for(thing)
       @by_thing[thing]
     end
 
-    # Apply `amount` damage to a mobj. `source` is the player (used for
-    # the explosion-damage path); pass nil if the damage isn't routed
-    # through anyone (e.g. chain-reaction barrel damaging another
-    # barrel, then the player happens to be in range and gets hurt).
+    # Apply `amount` damage. `source` is the attacker (Player for player
+    # weapons, another Mobj's source for radius damage). For monsters,
+    # damage also flips them into "see" mode (target acquired) and may
+    # punt them into the pain state.
     def damage(mobj, amount, source: nil)
-      return unless mobj.state == :alive
+      return if mobj.state != :alive
       mobj.health -= amount
-      start_death(mobj, source) if mobj.health <= 0
+      if mobj.health <= 0
+        start_death(mobj, source)
+        return
+      end
+      return unless mobj.kind == :monster
+
+      # Targets the source if the source is a player (vanilla also
+      # supports monster-vs-monster infighting; we don't yet).
+      mobj.target = source if source.respond_to?(:x) && source.respond_to?(:y)
+
+      # Roll pain — pain_chance is out of 256. We bail out if the mobj
+      # is already in the pain sequence (vanilla's MF_JUSTHIT logic).
+      if rand(256) < mobj.info.pain_chance && mobj.info.pain_state
+        enter_state(mobj, mobj.info.pain_state)
+      end
     end
 
-    def update_tic(_player)
+    def update_tic(player)
+      @player = player
       @mobjs.each do |m|
-        next unless m.state == :dying
-        m.frame_timer -= 1
-        advance_death_frame(m) if m.frame_timer <= 0
+        case m.kind
+        when :barrel
+          tick_barrel(m)
+        when :monster
+          tick_monster(m)
+        end
+      end
+    end
+
+    # Dispatched by the AI when an action handler decides to switch
+    # state (e.g. A_Chase deciding to enter the attack sequence). Also
+    # what Combat itself calls on pain/death.
+    def enter_state(mobj, state_key)
+      mobj.state_key = state_key
+      st = MonsterStates[state_key]
+      if st.nil? || st.tics.nil?
+        # Terminal state (tics = nil): sit forever. For corpses this is
+        # the final death frame.
+        if st
+          apply_monster_frame(mobj, st)
+        end
+        mobj.frame_timer = 0
+        # State is :dying if we were transitioning into the death
+        # sequence; once on the last frame it's :dead and immutable.
+        if mobj.state == :dying
+          mobj.state = :dead
+        end
+        return
+      end
+      apply_monster_frame(mobj, st)
+      mobj.frame_timer = st.tics
+      # Action fires on entry. The AI may itself decide to immediately
+      # transition (e.g. A_Chase calling enter_state(missile_state));
+      # if it does, we don't want to overwrite that — apply_action
+      # returns true if it issued its own transition.
+      if st.action && @ai
+        # Re-snapshot the current state_key so we only honour the
+        # AI's transition if it actually changed it.
+        before = mobj.state_key
+        @ai.run_action(st.action, mobj, @player)
+        return if mobj.state_key != before
       end
     end
 
     private
 
-    def start_death(mobj, source)
-      mobj.state         = :dying
-      mobj.frame_index   = 0
-      apply_death_frame(mobj)
-      # MF_SOLID cleared on death — player can walk through wreckage.
-      mobj.thing.solid_override = false
-      explode(mobj, source) if mobj.kind == :barrel
+    def spawn_barrel(thing)
+      Mobj.new(thing, BARREL_HEALTH, :alive, 0, 0, :barrel,
+               nil, nil, nil, nil, nil, nil)
     end
 
-    def apply_death_frame(mobj)
-      sprite, frame, tics = DEATH_FRAMES[mobj.frame_index]
+    def spawn_monster(thing, info)
+      mobj = Mobj.new(thing, info.health, :alive, 0, 0, :monster,
+                      info, info.spawn_state, nil, DI_NODIR, 0,
+                      info.reaction_time)
+      # Place the mobj on its spawn-state frame immediately so the
+      # renderer can pick the right sprite from tic 0.
+      st = MonsterStates[info.spawn_state]
+      apply_monster_frame(mobj, st)
+      mobj.frame_timer = st.tics
+      mobj
+    end
+
+    def tick_barrel(mobj)
+      return unless mobj.state == :dying
+      mobj.frame_timer -= 1
+      advance_barrel_frame(mobj) if mobj.frame_timer <= 0
+    end
+
+    def tick_monster(mobj)
+      return if mobj.state == :dead
+      # Reaction-time countdown is shared across alive states; A_Look
+      # checks it before acquiring a target.
+      mobj.reaction_time -= 1 if mobj.reaction_time && mobj.reaction_time > 0
+      mobj.frame_timer -= 1
+      return if mobj.frame_timer > 0
+      advance_monster_state(mobj)
+    end
+
+    def advance_monster_state(mobj)
+      st = MonsterStates[mobj.state_key]
+      nxt = st.next
+      if nxt.nil?
+        # Terminal frame: nothing to advance. Make sure we're marked dead.
+        mobj.state = :dead if mobj.state == :dying
+        return
+      end
+      enter_state(mobj, nxt)
+    end
+
+    def apply_monster_frame(mobj, st)
+      return unless st && st.sprite
+      mobj.thing.sprite_override = st.sprite
+      mobj.thing.frame_override  = st.frame
+    end
+
+    def start_death(mobj, source)
+      mobj.state = :dying
+      mobj.thing.solid_override = false
+      if mobj.kind == :barrel
+        mobj.frame_index = 0
+        apply_barrel_frame(mobj)
+        explode(mobj, source)
+      elsif mobj.kind == :monster
+        # Vanilla also has an "extreme death" path for overkill damage;
+        # we ignore it for now and fall through to the normal death
+        # sequence.
+        if mobj.info.death_state
+          enter_state(mobj, mobj.info.death_state)
+        else
+          mobj.state = :dead
+        end
+      end
+    end
+
+    def apply_barrel_frame(mobj)
+      sprite, frame, tics = BARREL_DEATH_FRAMES[mobj.frame_index]
       mobj.thing.sprite_override = sprite
       mobj.thing.frame_override  = frame
       mobj.frame_timer = tics
     end
 
-    def advance_death_frame(mobj)
+    def advance_barrel_frame(mobj)
       mobj.frame_index += 1
-      if mobj.frame_index >= DEATH_FRAMES.size
+      if mobj.frame_index >= BARREL_DEATH_FRAMES.size
         mobj.state         = :dead
         mobj.thing.removed = true
       else
-        apply_death_frame(mobj)
+        apply_barrel_frame(mobj)
       end
     end
 
     def explode(mobj, source)
       cx = mobj.thing.x.to_f
       cy = mobj.thing.y.to_f
-      # Player splash. The source is just used for "who killed who";
-      # we don't have an attribution chain yet, so the player takes
-      # damage regardless.
       if source
         damage_amt = falloff_damage(cx, cy, source.x, source.y)
         source.take_damage(damage_amt) if damage_amt > 0
       end
-      # Chain reaction: every other live mobj within range takes a
-      # capped hit. Capture the list first so iterating while mutating
-      # `@mobjs` (or the per-mobj state) is safe.
+      # Damage every other live mobj within range (chain reactions for
+      # barrels; splash damage to monsters once they live here).
       @mobjs.select { |m| m != mobj && m.state == :alive }.each do |other|
         d = Math.hypot(other.thing.x - cx, other.thing.y - cy)
         damage(other, EXPLOSION_MAX_DAMAGE, source: source) if d < EXPLOSION_RADIUS
