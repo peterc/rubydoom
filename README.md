@@ -4,14 +4,14 @@
 
 A pure-Ruby DOOM port for benchmarking purposes. Runs headlessly or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/).
 
-The point of the project is not to be a DOOM implementation to *play*, but to be a **realistic, large workload for benchmarking Ruby implementations and their JIT compilers**. DOOM heavily exercises mixed hot loops (rasterizers, BSP traversal, fixed-point-style math), allocation patterns (visplanes, segs, mobjs), method-call density, and string manipulation.
+The point of the project is not to be a DOOM implementation to *play*, but to be a **realistic, large workload for benchmarking Ruby implementations and their JIT compilers**.
 
 > [!NOTE]
-> DOOM1.WAD is needed but not included in this project. However, [you can get it here.](https://doomwiki.org/wiki/DOOM1.WAD)
+> The shareware version of DOOM1.WAD is needed but not included in this project due to licensing concerns. It is legal to download, however, and [you can get it here.](https://doomwiki.org/wiki/DOOM1.WAD)
 
-## Quick start
+## Quick start in game mode
 
-You need Ruby (tested on 4.0.2), `bundle`, and a shareware `DOOM1.WAD` (`doom1.wad` is also accepted as a filename) in the project root.
+You need Ruby (tested on 4.0.2 and 3.4.7 - or headlessly only on TruffleRuby 34), `bundle`, and, as mentioned above, a `DOOM1.WAD` (`doom1.wad` is also accepted as a filename) in the project root.
 
 ```sh
 bundle install
@@ -23,7 +23,7 @@ Default controls: WASD or arrow keys to move, mouse to look (click in the window
 
 ## Benchmarking
 
-The whole simulation can be driven deterministically: seed the RNG, record a demo (per-tic player input), then replay it under different Ruby/JIT configurations. Output is byte-identical given the same seed.
+The simulation can be driven deterministically: seed the RNG, record a demo, then replay it under different configurations. Output is identical given the same seed.
 
 ```sh
 # Record (interactive play, normal 35 Hz)
@@ -45,34 +45,7 @@ Sample output:
 [benchmark] final_frame_sha1=5413388c5fe2660e8099c30b3854af64776558fc map=E1M1 seed=42
 ```
 
-`tps` is simulation-plus-rasterizer throughput in pure Ruby. The `final_frame_sha1` is the regression check — if it changes between runs of the same demo, something nondeterministic crept in; if it changes between JIT modes, the JIT is wrong about something.
-
-## How it works
-
-The code is split into two layers separated by a small input struct:
-
-  * **Simulation** (`lib/rubydoom/` everything not in the Gosu list
-    below) — pure Ruby. Parses the WAD, builds the BSP, runs collision,
-    AI, projectiles, weapons, sector physics. Takes a `Rubydoom::Input`
-    each tic, advances the world, exposes state for the renderer.
-
-  * **Frontend** — `app.rb`, `renderer3d.rb`, `automap.rb`,
-    `framebuffer.rb`, `gosu_image_cache.rb`, `hud.rb`, `sound.rb`,
-    `wipe.rb`. Owns the Gosu window, samples input, draws.
-
-`Renderer3D` writes RGBA bytes into a persistent `Framebuffer` (a
-plain String) via a column-major rasterizer for walls and a row-major
-rasterizer for visplanes, with COLORMAP shading by row. The last step
-uploads that buffer to a Gosu image — and that's the only line that
-needs a GL context. Pass `present: false` to skip it.
-
-For benchmarking, `Rubydoom::HeadlessRunner` constructs `Game` +
-`Renderer3D` directly, replays a demo, calls `draw(present: false)`
-each tic, and reports throughput. No `App`, no `Gosu::Window`, no
-display required.
-
-The simulation tic rate is DOOM's native 35 Hz. Every speed, timer,
-and animation duration in the codebase is expressed in tics.
+`tps` is simulation-plus-rasterizer throughput in pure Ruby (essentially the equivalent of fps, but without being rendered to screen). The `final_frame_sha1` is a regression check — if it changes between runs of the same demo, something nondeterministic crept in; if it changes between JIT modes, the JIT is wrong about something.
 
 ## CLI
 
@@ -138,6 +111,33 @@ and animation duration in the codebase is expressed in tics.
 
   * `rake profile:game` — alternate stackprof harness invoked via
     Rake. Honours `MAP`, `WAD`, `OUT`, `INTERVAL` env vars.
+
+## How it works
+
+The code is split into two layers separated by a small input struct:
+
+  * **Simulation** (`lib/rubydoom/` everything not in the Gosu list
+    below) — pure Ruby. Parses the WAD, builds the BSP, runs collision,
+    AI, projectiles, weapons, sector physics. Takes a `Rubydoom::Input`
+    each tic, advances the world, exposes state for the renderer.
+
+  * **Frontend** — `app.rb`, `renderer3d.rb`, `automap.rb`,
+    `framebuffer.rb`, `gosu_image_cache.rb`, `hud.rb`, `sound.rb`,
+    `wipe.rb`. Owns the Gosu window, samples input, draws.
+
+`Renderer3D` writes RGBA bytes into a persistent `Framebuffer` (a
+plain String) via a column-major rasterizer for walls and a row-major
+rasterizer for visplanes, with COLORMAP shading by row. The last step
+uploads that buffer to a Gosu image — and that's the only line that
+needs a GL context. Pass `present: false` to skip it.
+
+For benchmarking, `Rubydoom::HeadlessRunner` constructs `Game` +
+`Renderer3D` directly, replays a demo, calls `draw(present: false)`
+each tic, and reports throughput. No `App`, no `Gosu::Window`, no
+display required.
+
+The simulation tic rate is DOOM's native 35 Hz. Every speed, timer,
+and animation duration in the codebase is expressed in tics.
 
 ## Demo file format
 
