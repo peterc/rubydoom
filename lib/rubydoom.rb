@@ -23,7 +23,6 @@ require_relative "rubydoom/floors"
 require_relative "rubydoom/switches"
 require_relative "rubydoom/wall_scrollers"
 require_relative "rubydoom/player"
-require_relative "rubydoom/game_state"
 require_relative "rubydoom/face"
 
 # Gosu-dependent layers. Loaded last so non-graphical tools (asset dumps,

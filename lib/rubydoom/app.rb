@@ -61,7 +61,6 @@ module Rubydoom
       @flats    = AnimatedFlats.new(Flats.new(@wad))
       images    = GosuImageCache.new(graphics)
       @hud      = HUD.new(images)
-      @state    = GameState.default
 
       load_map(map_name)
       # Honour debug-spawn env vars on the initial map only; transitions
@@ -89,7 +88,7 @@ module Rubydoom
 
     # Build (or rebuild) every per-map subsystem. Asset state — palette,
     # colormap, textures/flats/sprites caches, the gosu image cache, the
-    # HUD, GameState — persists across maps. Texture and flat animation
+    # HUD — persists across maps. Texture and flat animation
     # phase carries over too, which feels right (the slime flow doesn't
     # snap on a level change).
     def load_map(map_name)
@@ -159,7 +158,7 @@ module Rubydoom
       @scrollers.update_tic
       @flats.update_tic
       @textures.update_tic
-      @hud.update_tic(@state)
+      @hud.update_tic(@player)
       announce_exit_if_pending
     end
 
@@ -183,6 +182,12 @@ module Rubydoom
       when Gosu::KB_SPACE  then @doors.try_use(@player) || @switches.try_use(@player)
       when Gosu::KB_P
         puts "RUBYDOOM_X=#{@player.x} RUBYDOOM_Y=#{@player.y} RUBYDOOM_ANGLE=#{@player.angle}"
+      # Debug shortcuts for verifying that HUD numbers track player
+      # state. Will go away once pickups / damage floors / combat
+      # drive these on their own.
+      when Gosu::KB_LEFT_BRACKET   then @player.take_damage(10)
+      when Gosu::KB_RIGHT_BRACKET  then @player.add_health(10)
+      when Gosu::KB_BACKSLASH      then @player.add_armor(25, type: :green)
       end
     end
 
@@ -239,7 +244,7 @@ module Rubydoom
       else
         @renderer3d.draw(@player)
       end
-      @hud.draw(@state)
+      @hud.draw(@player)
     end
 
     # Mouse-look: read the cursor's offset from the window center, convert

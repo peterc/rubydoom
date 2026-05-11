@@ -19,7 +19,18 @@ module Rubydoom
     FACE_X             = 143
     FACE_Y             = 168
 
-    BIG_NUM_PREFIX     = "STTNUM"  # red, height 16
+    BIG_NUM_PREFIX     = "STTNUM"   # red, height 16
+    SMALL_NUM_PREFIX   = "STYSNUM"  # yellow, height 6
+
+    # Right-side ammo panel. Each row shows current / max for one
+    # ammo type; the BULL / SHEL / RCKT / CELL labels are baked into
+    # STBAR so we only draw the numbers. Coordinates from
+    # linuxdoom-1.10/st_stuff.c (ST_AMMO0X / ST_MAXAMMO0X / spacing 6).
+    AMMO_PANEL_TOP_Y       = 173
+    AMMO_PANEL_ROW_DY      = 6
+    AMMO_PANEL_CUR_RIGHT_X = 288
+    AMMO_PANEL_MAX_RIGHT_X = 314
+    AMMO_PANEL_TYPES       = %i[bullet shell rocket cell].freeze
 
     # Weapon ("psprite") position. DOOM positions weapon patches via
     #   screen_xy = psp_xy - patch_offset_xy
@@ -41,25 +52,25 @@ module Rubydoom
       @face   = face
     end
 
-    def update_tic(state)
-      @face.update_tic(state.health)
+    def update_tic(player)
+      @face.update_tic(player.health)
     end
 
-    def draw(state)
-      draw_weapon(state)
-      draw_status_bar(state)
+    def draw(player)
+      draw_weapon(player)
+      draw_status_bar(player)
     end
 
     private
 
-    def draw_weapon(state)
-      lump = weapon_lump_for(state.current_weapon)
+    def draw_weapon(player)
+      lump = weapon_lump_for(player.current_weapon)
       return unless lump
       sprite = @images[lump]
       sprite.draw_anchored(PSP_IDLE_X, PSP_IDLE_Y, Z_WEAPON)
     end
 
-    def draw_status_bar(state)
+    def draw_status_bar(player)
       # All status-bar elements use draw_anchored, which mirrors vanilla
       # DOOM's V_DrawPatch (it applies the patch's left/top offsets).
       # STBAR / STARMS / STTNUM* have (0,0) offsets so it's a no-op for
@@ -67,11 +78,35 @@ module Rubydoom
       @images["STBAR"].draw_anchored(0, STATUS_BAR_Y, Z_STATUS_BAR_BG)
       @images["STARMS"].draw_anchored(ARMS_X, ARMS_Y, Z_STATUS_BAR_FG)
 
-      draw_big_number(state.ammo,   right_x: AMMO_RIGHT_X,   y: BIG_NUM_Y)
-      draw_big_number(state.health, right_x: HEALTH_RIGHT_X, y: BIG_NUM_Y, percent: true)
-      draw_big_number(state.armor,  right_x: ARMOR_RIGHT_X,  y: BIG_NUM_Y, percent: true)
+      # Big AMMO is the current weapon's primary ammo count; melee
+      # weapons (fist / chainsaw) have no ammo type so we leave the
+      # slot blank rather than draw a zero.
+      cur = player.current_ammo
+      draw_big_number(cur, right_x: AMMO_RIGHT_X, y: BIG_NUM_Y) if cur
 
-      @images[@face.lump_name(state.health)].draw_anchored(FACE_X, FACE_Y, Z_STATUS_BAR_FG)
+      draw_big_number(player.health, right_x: HEALTH_RIGHT_X, y: BIG_NUM_Y, percent: true)
+      draw_big_number(player.armor,  right_x: ARMOR_RIGHT_X,  y: BIG_NUM_Y, percent: true)
+
+      draw_ammo_panel(player)
+
+      @images[@face.lump_name(player.health)].draw_anchored(FACE_X, FACE_Y, Z_STATUS_BAR_FG)
+    end
+
+    def draw_ammo_panel(player)
+      AMMO_PANEL_TYPES.each_with_index do |type, i|
+        y = AMMO_PANEL_TOP_Y + i * AMMO_PANEL_ROW_DY
+        draw_small_number(player.ammo[type],     right_x: AMMO_PANEL_CUR_RIGHT_X, y: y)
+        draw_small_number(player.max_ammo[type], right_x: AMMO_PANEL_MAX_RIGHT_X, y: y)
+      end
+    end
+
+    def draw_small_number(value, right_x:, y:)
+      cursor = right_x
+      value.to_s.reverse.each_char do |digit|
+        glyph = @images["#{SMALL_NUM_PREFIX}#{digit}"]
+        cursor -= glyph.width
+        glyph.draw_anchored(cursor, y, Z_STATUS_BAR_FG)
+      end
     end
 
     # Right-aligned: rightmost digit's right edge sits at right_x. The
