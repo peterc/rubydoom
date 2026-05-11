@@ -160,7 +160,7 @@ Edge codes form a stable, append-only table (`use`, `respawn`,
 `toggle_god`, `weapon_1..7`, `debug_*`) — older demos keep replaying
 as new edges are added.
 
-## AI disclosure
+## 🤖 AI disclosure
 
 While I've played Doom since it first came out and have a good technical understanding of how the Doom engine works, I did not hand-write this! Claude Code did most of the work (albeit with hundreds of prompts and guidance from me) and Codex covered some of the performance side and review.
 
