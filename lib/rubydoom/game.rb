@@ -77,8 +77,11 @@ module Rubydoom
 
     # Build (or rebuild) every per-map subsystem. Asset state in the
     # constructor persists across maps; everything keyed off the map
-    # geometry is rebuilt here.
+    # geometry is rebuilt here. The previous player's inventory is
+    # carried into the new map (vanilla single-player behavior — keys
+    # reset, but weapons / ammo / backpack / armor / health all stick).
     def load_map(map_name)
+      carried_player = @player
       @map        = Map.load(@wad, map_name, skill: @skill)
       @bsp        = Bsp.new(@map.nodes)
       @clipper    = Clipper.new(@map, @bsp)
@@ -97,6 +100,7 @@ module Rubydoom
       @pickups        = Pickups.new(@map)
       @pickups.sound  = @sound
       @player      = Player.from_thing(@map.player_start)
+      carry_inventory_from(carried_player) if carried_player
       @noise_alert = NoiseAlert.new(@map)
       # Doors and walk-triggers propagate noise so monsters in the
       # next room aren't caught flat-footed when the player walks in.
@@ -188,6 +192,29 @@ module Rubydoom
     end
 
     private
+
+    # Carry the prior map's player inventory into the freshly-spawned
+    # player at the new map's start. Vanilla single-player rules:
+    #   * health, armor + armor_class, ammo + max_ammo (so backpack
+    #     stays doubled), backpack flag, weapons_owned, current_weapon
+    #     — all carry.
+    #   * keys reset (each map has its own keyset).
+    #   * pending_weapon clears — the old Weapons state machine is gone
+    #     and we don't want a half-honored switch lingering.
+    #   * x / y / angle / view_height / bob come from the new player_start
+    #     (already set by Player.from_thing above).
+    def carry_inventory_from(prev)
+      @player.health      = prev.health
+      @player.armor       = prev.armor
+      @player.armor_class = prev.armor_class
+      prev.ammo.each     { |k, v| @player.ammo[k]     = v }
+      prev.max_ammo.each { |k, v| @player.max_ammo[k] = v }
+      @player.backpack       = prev.backpack
+      prev.weapons_owned.each { |k, v| @player.weapons_owned[k] = v }
+      @player.current_weapon = prev.current_weapon
+      @player.pending_weapon = nil
+      @player.god_mode       = prev.god_mode
+    end
 
     # Walk-trigger dispatch. Clipper calls this for each special
     # linedef the player crossed in the last successful slide. W1
