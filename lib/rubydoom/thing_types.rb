@@ -58,10 +58,14 @@ module Rubydoom
       # Powerups — pickups.
       Info.new(doomednum: 2024, sprite: "PINS", frame: "A", radius: 20, solid: false),  # invisibility
 
-      # Keys — pickups.
+      # Keys — pickups. Both card (flat) and skull variants of each
+      # colour exist; doom1 door specials accept either.
       Info.new(doomednum:    5, sprite: "BKEY", frame: "A", radius: 20, solid: false),  # blue card
       Info.new(doomednum:    6, sprite: "YKEY", frame: "A", radius: 20, solid: false),  # yellow card
       Info.new(doomednum:   13, sprite: "RKEY", frame: "A", radius: 20, solid: false),  # red card
+      Info.new(doomednum:   38, sprite: "RSKU", frame: "A", radius: 20, solid: false),  # red skull
+      Info.new(doomednum:   39, sprite: "YSKU", frame: "A", radius: 20, solid: false),  # yellow skull
+      Info.new(doomednum:   40, sprite: "BSKU", frame: "A", radius: 20, solid: false),  # blue skull
 
       # Decorations / props — MF_SOLID in vanilla except the small candle.
       Info.new(doomednum: 2035, sprite: "BAR1", frame: "A", radius: 10, solid: true),   # exploding barrel

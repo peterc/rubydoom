@@ -26,6 +26,13 @@ module Rubydoom
   # Run-stats (level/episode totals):
   #   secrets_found — number of secret sectors entered. Vanilla calls
   #     this `secretcount`; intermission shows it as `% found`.
+  #
+  # Keys:
+  #   keys — hash of colour -> {card:, skull:} booleans. Locked doors
+  #     check `has_key?(:blue / :yellow / :red)`, which is true if
+  #     either variant is held. We track card-vs-skull separately so
+  #     future Doom 2 specials that care about the distinction can
+  #     check `keys[colour][:card]` / `[:skull]` directly.
   NOMINAL_VIEW_HEIGHT = 41
 
   Player = Struct.new(:x, :y, :angle, :bob, :view_height,
@@ -33,7 +40,8 @@ module Rubydoom
                       :ammo, :max_ammo,
                       :current_weapon,
                       :backpack,
-                      :secrets_found) do
+                      :secrets_found,
+                      :keys) do
     DEFAULT_MAX_HEALTH = 100
     SOULSPHERE_MAX     = 200
     DEFAULT_MAX_ARMOR  = 200
@@ -63,7 +71,33 @@ module Rubydoom
           DEFAULT_AMMO.dup, DEFAULT_MAX_AMMO.dup,
           :pistol,
           false,
-          0)
+          0,
+          empty_keys)
+    end
+
+    # Fresh key inventory: no colour, no variant.
+    def self.empty_keys
+      { blue:   { card: false, skull: false },
+        yellow: { card: false, skull: false },
+        red:    { card: false, skull: false } }
+    end
+
+    # True iff the player holds either variant (card or skull) of this
+    # colour. Doom 1 keyed doors accept either; that's what locked-door
+    # specials check.
+    def has_key?(colour)
+      k = keys[colour]
+      k && (k[:card] || k[:skull])
+    end
+
+    # Picks up a key card/skull. Returns true if absorbed (i.e. the
+    # player didn't already hold this exact variant); vanilla's rule
+    # is that a duplicate key never disappears from the floor.
+    def pickup_key(colour, variant)
+      slot = keys[colour]
+      return false if slot[variant]
+      slot[variant] = true
+      true
     end
 
     # Count for the current weapon's ammo type, or nil for melee.

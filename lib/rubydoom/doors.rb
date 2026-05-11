@@ -12,15 +12,42 @@ module Rubydoom
   #   * waiting   → reset the wait timer
   #   * closing   → reverse to opening
   #   * opening   → ignored (mirrors DOOM DR behaviour)
+  #
+  # Door specials we recognise (door-by-Use only — walk-triggers and
+  # remote-tag doors are still TODO):
+  #
+  #   DR (repeatable, opens-and-closes):
+  #     1  — no key
+  #     26 — needs blue key, 27 — yellow, 28 — red
+  #   D1 (once, opens-and-stays-open; special cleared after use):
+  #     31 — no key
+  #     32 — blue, 33 — red, 34 — yellow
+  #
+  # Doom 1 specials accept either the card or skull of a colour, so
+  # we consult `player.has_key?(:colour)` rather than the variant.
   class Doors
     USE_RANGE      = 64.0
     DOOR_SPEED_TIC = 2     # units per tic (DOOM-spec)
     WAIT_TICS      = 150   # ~4.3s at 35 tics/sec (DOOM-spec)
     DOOR_GAP       = 4     # final opening sits this far below the lowest neighbor ceiling
 
-    DR_DOOR_SPECIAL = 1
+    # special_type → {kind:, key:}.
+    #   kind: :dr (repeat, close after delay) or :d1 (once, stay open).
+    #   key:  required colour (nil = no key).
+    DOOR_SPECIALS = {
+      1  => { kind: :dr, key: nil    },
+      26 => { kind: :dr, key: :blue  },
+      27 => { kind: :dr, key: :yellow },
+      28 => { kind: :dr, key: :red   },
+      31 => { kind: :d1, key: nil    },
+      32 => { kind: :d1, key: :blue  },
+      33 => { kind: :d1, key: :red   },
+      34 => { kind: :d1, key: :yellow },
+    }.freeze
 
-    Door = Struct.new(:sector, :top_height, :state, :timer)
+    # `kind` is the door behaviour at the top (:dr closes after WAIT_TICS,
+    # :d1 stays open and the entry is dropped from @active once fully open).
+    Door = Struct.new(:sector, :top_height, :state, :timer, :kind)
 
     def initialize(map)
       @map     = map
@@ -33,9 +60,10 @@ module Rubydoom
       dx = Math.cos(rad); dy = Math.sin(rad)
       hits = ray_hits(player.x, player.y, dx, dy, USE_RANGE)
       hits.each do |_t, ld|
-        # First special we run into wins.
-        if ld.special_type == DR_DOOR_SPECIAL && ld.two_sided?
-          activate_dr_door(ld)
+        spec = DOOR_SPECIALS[ld.special_type]
+        if spec && ld.two_sided?
+          return false unless spec[:key].nil? || player.has_key?(spec[:key])
+          activate_door(ld, spec)
           return true
         end
         # A solid line (one-sided or impassable) stops the ray cold —
@@ -55,8 +83,12 @@ module Rubydoom
           d.sector.ceiling_height += DOOR_SPEED_TIC
           if d.sector.ceiling_height >= d.top_height
             d.sector.ceiling_height = d.top_height
-            d.state = :waiting
-            d.timer = WAIT_TICS
+            if d.kind == :d1
+              d.state = :done   # stays open; will be reaped below
+            else
+              d.state = :waiting
+              d.timer = WAIT_TICS
+            end
           end
         when :waiting
           d.timer -= 1
@@ -68,25 +100,36 @@ module Rubydoom
           end
         end
       end
-      @active.reject! { |_, d| d.state == :closing && d.sector.ceiling_height <= d.sector.floor_height }
+      @active.reject! do |_, d|
+        d.state == :done ||
+          (d.state == :closing && d.sector.ceiling_height <= d.sector.floor_height)
+      end
     end
 
     private
 
-    def activate_dr_door(ld)
+    def activate_door(ld, spec)
       sector = @map.linedef_back_sector(ld)
       return unless sector
       existing = @active[sector.object_id]
       if existing
-        case existing.state
-        when :waiting then existing.timer = WAIT_TICS
-        when :closing then existing.state = :opening
+        # DR re-press: refresh wait or reverse a close. D1 doors are
+        # one-shot (special is cleared on success), so we shouldn't
+        # see one here from a Use ray — guard with the kind anyway.
+        if existing.kind == :dr
+          case existing.state
+          when :waiting then existing.timer = WAIT_TICS
+          when :closing then existing.state = :opening
+          end
         end
         return
       end
       top = lowest_neighbor_ceiling(sector) - DOOR_GAP
       return if top <= sector.floor_height
-      @active[sector.object_id] = Door.new(sector, top, :opening, 0)
+      @active[sector.object_id] = Door.new(sector, top, :opening, 0, spec[:kind])
+      # D1 doors are one-time use; vanilla clears the special so a
+      # closed-again door can't be reopened (these stay open anyway).
+      ld.special_type = 0 if spec[:kind] == :d1
     end
 
     # Lowest ceiling among sectors that share a two-sided linedef with

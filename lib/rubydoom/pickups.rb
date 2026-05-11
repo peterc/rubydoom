@@ -14,9 +14,11 @@ module Rubydoom
   #   Armor:  green armor, blue armor, armor bonus
   #   Ammo:   clip, 4 shells, box of bullets, box of shells,
   #           box of rockets, backpack
+  #   Keys:   blue/yellow/red cards + skull variants — locked doors
+  #           in `Doors` consult `player.has_key?(:colour)`.
   #
-  # Not yet (in TODO.txt): weapons (need weapons-owned set), keys
-  # (need keys set + door integration), powerups (need timer system).
+  # Not yet (in TODO.txt): weapons (need weapons-owned set), powerups
+  # (need timer system).
   class Pickups
     def initialize(map)
       @map     = map
@@ -77,6 +79,14 @@ module Rubydoom
       when 2049 then player.add_ammo(:shell,  20) > 0               # box of shells
       when 2046 then player.add_ammo(:rocket,  5) > 0               # box of rockets
       when    8 then player.pickup_backpack                         # backpack
+
+      # ---- Keys ----
+      when    5 then player.pickup_key(:blue,   :card)              # blue card
+      when    6 then player.pickup_key(:yellow, :card)              # yellow card
+      when   13 then player.pickup_key(:red,    :card)              # red card
+      when   40 then player.pickup_key(:blue,   :skull)             # blue skull
+      when   39 then player.pickup_key(:yellow, :skull)             # yellow skull
+      when   38 then player.pickup_key(:red,    :skull)             # red skull
       else
         false
       end
@@ -90,6 +100,7 @@ module Rubydoom
       2011, 2012, 2013, 2014,             # health
       2018, 2019, 2015,                   # armor
       2007, 2048, 2008, 2049, 2046, 8,    # ammo + backpack
+      5, 6, 13, 38, 39, 40,               # keys (cards + skulls)
     ].freeze
   end
 end
