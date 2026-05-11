@@ -22,12 +22,17 @@ module Rubydoom
   #     pairs; the big AMMO box shows whichever the current weapon
   #     consumes (nil for melee).
   #   current_weapon — symbol matching HUD#weapon_lump_for.
+  #
+  # Run-stats (level/episode totals):
+  #   secrets_found — number of secret sectors entered. Vanilla calls
+  #     this `secretcount`; intermission shows it as `% found`.
   NOMINAL_VIEW_HEIGHT = 41
 
   Player = Struct.new(:x, :y, :angle, :bob, :view_height,
                       :health, :armor, :armor_class,
                       :ammo, :max_ammo,
-                      :current_weapon) do
+                      :current_weapon,
+                      :secrets_found) do
     DEFAULT_MAX_HEALTH = 100
     SOULSPHERE_MAX     = 200
     DEFAULT_MAX_ARMOR  = 200
@@ -55,7 +60,8 @@ module Rubydoom
       new(thing.x, thing.y, thing.angle, 0.0, NOMINAL_VIEW_HEIGHT.to_f,
           DEFAULT_MAX_HEALTH, 0, nil,
           DEFAULT_AMMO.dup, DEFAULT_MAX_AMMO.dup,
-          :pistol)
+          :pistol,
+          0)
     end
 
     # Count for the current weapon's ammo type, or nil for melee.

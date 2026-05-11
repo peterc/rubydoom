@@ -46,13 +46,21 @@ module Rubydoom
     # Floor height of the subsector containing (x, y). Public because the
     # view-height smoother in App needs it to detect step-ups each tic.
     def floor_at(x, y)
+      sec = sector_at(x, y)
+      sec&.floor_height
+    end
+
+    # Sector containing point (x, y). Resolved by descending the BSP
+    # to a subsector, then back to a sector via the subsector's first
+    # seg (the seg's direction picks front or back sidedef).
+    def sector_at(x, y)
       ss_index = @bsp.subsector_at(x, y)
       ss = @map.subsectors[ss_index]
       seg = @map.segs[ss.first_seg_index]
       ld = @map.linedefs[seg.linedef_index]
       sd_index = seg.direction.zero? ? ld.front_sidedef_index : ld.back_sidedef_index
       sd = @map.sidedefs[sd_index]
-      @map.sectors[sd.sector_index].floor_height
+      @map.sectors[sd.sector_index]
     end
 
     def slide(x0, y0, x1, y1)
