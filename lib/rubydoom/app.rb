@@ -7,10 +7,17 @@ module Rubydoom
   # in Game — App constructs a Game, hands it the HUD, and drives it via
   # game.tick(input) once per Gosu update callback.
   #
-  # This is the only file in the library that requires "gosu". An
-  # alternative frontend (SDL2, Raylib, headless) would replace this
-  # file and provide its own renderer / image cache / sound driver, but
-  # would leave Game untouched.
+  # Gosu is firewalled to the frontend layer: app.rb plus the renderers
+  # / framebuffer / image cache / HUD / sound driver (renderer3d.rb,
+  # automap.rb, framebuffer.rb, gosu_image_cache.rb, hud.rb, sound.rb).
+  # Of those, app.rb, renderer3d.rb, automap.rb, and gosu_image_cache.rb
+  # explicitly `require "gosu"`; framebuffer / hud / sound use Gosu types
+  # at runtime via the transitive load. Game and every per-map subsystem
+  # are pure Ruby — verifiable by loading game.rb in a process that
+  # doesn't require "gosu" and calling Game#tick with a synthetic Input.
+  # An alternative frontend (SDL2, Raylib, headless) would replace App
+  # plus those rendering / audio modules, but would leave Game and the
+  # rest of the simulation untouched.
   class App < Gosu::Window
     # DOOM's native screen size is 320x200. We scale up via Gosu.scale so
     # the rendering code can keep using original coordinates everywhere.
