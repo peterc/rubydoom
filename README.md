@@ -1,6 +1,8 @@
-# rubydoom
+# rubydoom - pure ruby doom clone
 
-A pure-Ruby DOOM port built on top of [Gosu](https://www.libgosu.org/), reading the shareware `DDOM1.WAD`.
+![rubydoom running E1M1](docs/screenshot.png)
+
+A pure-Ruby DOOM port for benchmarking purposes. Runs headlessly or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/).
 
 The point of the project is not to be a DOOM implementation to *play*, but to be a **realistic, large workload for benchmarking Ruby implementations and their JIT compilers**. DOOM heavily exercises mixed hot loops (rasterizers, BSP traversal, fixed-point-style math), allocation patterns (visplanes, segs, mobjs), method-call density, and string manipulation.
 
