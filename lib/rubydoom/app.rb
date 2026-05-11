@@ -28,6 +28,11 @@ module Rubydoom
 
     BACKGROUND_FILL = Gosu::Color.rgb(0, 0, 0)
 
+    # Z-order for the full-screen damage/bonus tint. Has to sit above
+    # the HUD (z = 100 inside hud.rb) so the wash covers the status bar
+    # too, matching vanilla's whole-screen palette swap.
+    Z_SCREEN_TINT = 1000
+
     def initialize(wad_path:, map_name: DEFAULT_MAP, scale: DEFAULT_SCALE,
                    dump_frame_to: nil, show_automap: false,
                    automap_mode: :lines, skill: nil)
@@ -260,6 +265,19 @@ module Rubydoom
         @renderer3d.draw(player)
       end
       @hud.draw(player)
+      draw_screen_tint(player)
+    end
+
+    # Vanilla "V_SetPalette" — a translucent red wash after damage,
+    # gold after pickups. Drawn last so it covers playfield + HUD,
+    # matching the full-screen palette swap in the original.
+    def draw_screen_tint(player)
+      tint = player.screen_tint
+      return unless tint
+      r, g, b, a = tint
+      Gosu.draw_rect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT,
+                     Gosu::Color.rgba(r, g, b, a),
+                     Z_SCREEN_TINT)
     end
 
     # Build the Input value for this tic. All Gosu polling lives here —

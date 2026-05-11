@@ -168,6 +168,7 @@ module Rubydoom
       @textures.update_tic
       @hud&.update_tic(@player)
       handle_edges(input.edges)
+      @player.tic_screen_tints!
     end
 
     # Respawn at the map's player_start. Single-player vanilla restarts

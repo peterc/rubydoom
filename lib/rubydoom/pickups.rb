@@ -43,6 +43,7 @@ module Rubydoom
         next false unless touches?(player, thing)
         if apply(player, thing)
           thing.removed = true
+          player.flash_bonus!
           play_pickup_sound(thing)
           true
         else

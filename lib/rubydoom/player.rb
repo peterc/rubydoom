@@ -54,10 +54,19 @@ module Rubydoom
                       :keys,
                       :weapons_owned,
                       :pending_weapon,
-                      :god_mode) do
+                      :god_mode,
+                      :damage_count, :bonus_count) do
     DEFAULT_MAX_HEALTH = 100
     SOULSPHERE_MAX     = 200
     DEFAULT_MAX_ARMOR  = 200
+
+    # Screen-tint counters (vanilla `damagecount` / `bonuscount`). Each
+    # decays by 1/tic and the displayed palette/overlay is chosen from
+    # whichever is non-zero. `damage_count` bumps by `amount` on every
+    # hit (capped at 100); `bonus_count` resets to BONUSADD on every
+    # successful pickup.
+    DAMAGE_COUNT_CAP = 100
+    BONUSADD         = 6
 
     # Maps each weapon to the ammo type it consumes; melee weapons
     # have no ammo (nil). The HUD reads this to decide what to show
@@ -112,7 +121,8 @@ module Rubydoom
           empty_keys,
           DEFAULT_WEAPONS.dup,
           nil,
-          false)
+          false,
+          0, 0)
     end
 
     # Fresh key inventory: no colour, no variant.
@@ -199,6 +209,8 @@ module Rubydoom
       self.keys = self.class.empty_keys
       self.backpack = false
       DEFAULT_MAX_AMMO.each { |k, v| self.max_ammo[k] = v }
+      self.damage_count = 0
+      self.bonus_count  = 0
     end
 
     # Count for the current weapon's ammo type, or nil for melee.
@@ -225,6 +237,7 @@ module Rubydoom
     def take_damage(amount)
       return if amount <= 0
       return if god_mode
+      raw = amount
       if armor.positive? && armor_class
         frac  = (armor_class == :blue) ? 0.5 : (1.0 / 3.0)
         saved = (amount * frac).to_i
@@ -236,6 +249,38 @@ module Rubydoom
         amount -= saved
       end
       self.health = [health - amount, 0].max
+      # Drive the red screen flash. Vanilla uses the raw incoming
+      # damage (pre-armor), capped at 100.
+      self.damage_count = [damage_count + raw, DAMAGE_COUNT_CAP].min
+    end
+
+    # Reset the bonus-pickup yellow flash counter. Called by Pickups
+    # after any successful absorbtion (item / armor / ammo / key / weapon).
+    def flash_bonus!
+      self.bonus_count = BONUSADD
+    end
+
+    # Per-tic decay for screen-tint counters. Game.tick calls this once
+    # per tic, after all damage / pickup events have been applied.
+    def tic_screen_tints!
+      self.damage_count = damage_count - 1 if damage_count > 0
+      self.bonus_count  = bonus_count  - 1 if bonus_count  > 0
+    end
+
+    # Translucent RGBA overlay color for the current frame, or nil if no
+    # tint is active. Red flash dominates a yellow one — vanilla applies
+    # them in the same priority order (damage trumps bonus). The math
+    # mirrors vanilla's V_SetPalette: count → 1..8 (red) or 1..4 (bonus).
+    def screen_tint
+      red = (damage_count + 7) >> 3
+      red = 8 if red > 8
+      return [255, 0, 0, red * 16] if red > 0
+
+      bonus = (bonus_count + 7) >> 3
+      bonus = 4 if bonus > 4
+      return [215, 186, 69, bonus * 12] if bonus > 0
+
+      nil
     end
 
     # Heal up to a cap. Returns true iff health actually went up
