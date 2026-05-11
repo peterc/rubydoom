@@ -10,30 +10,56 @@ module Rubydoom
   # used twice.
   #
   # Currently implements:
-  #   * type 11 — S1 Exit Level. Sets exit_requested; the game loop
+  #   * type 11  — S1 Exit Level. Sets exit_requested; the game loop
   #     reads it.
+  #   * type 103 — S1 Door Open Stay (remote, by tag). Opens any
+  #     sector tagged the same as this linedef, as a stay-open door.
+  #   * type 62  — SR Lift (Lower Wait Raise, by tag). Repeatable
+  #     switch variant of the WR walk-trigger lift (88) — same plat
+  #     behaviour, just triggered by Use instead of crossing.
   class Switches
     USE_RANGE = 64.0
 
-    S1_EXIT_LEVEL = 11
+    S1_EXIT_LEVEL        = 11
+    S1_DOOR_OPEN_STAY    = 103
+    SR_LIFT_LOWER_RAISE  = 62
+
+    # Once-only switches (S1*) get their special_type cleared after
+    # firing so they can't be re-used. Repeatable switches (SR*) leave
+    # the special intact; we still swap the texture so the player gets
+    # the click animation.
+    ONCE_ONLY = [S1_EXIT_LEVEL, S1_DOOR_OPEN_STAY].freeze
 
     attr_reader :exit_requested
 
     def initialize(map)
       @map = map
       @exit_requested = false
+      @doors = nil
+      @plats = nil
     end
+
+    # Late-bound to avoid initialization-order dependencies in App.
+    attr_writer :doors, :plats
 
     def try_use(player)
       rad = player.angle * Math::PI / 180.0
       dx = Math.cos(rad); dy = Math.sin(rad)
       hits = ray_hits(player.x, player.y, dx, dy, USE_RANGE)
       hits.each do |_t, ld|
-        case ld.special_type
-        when S1_EXIT_LEVEL
-          @exit_requested = true
+        fired =
+          case ld.special_type
+          when S1_EXIT_LEVEL
+            @exit_requested = true
+            true
+          when S1_DOOR_OPEN_STAY
+            @doors&.open_tagged(ld.sector_tag, kind: :d1)
+          when SR_LIFT_LOWER_RAISE
+            @plats&.activate_tag(ld.sector_tag)
+          end
+        if fired
           swap_switch_texture(ld)
-          ld.special_type = 0
+          ld.special_type = 0 if ONCE_ONLY.include?(ld.special_type)
           return true
         end
         return false if !ld.two_sided? || ld.impassable?

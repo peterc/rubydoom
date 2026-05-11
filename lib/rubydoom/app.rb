@@ -83,6 +83,10 @@ module Rubydoom
       # the playfield captures; Esc (or losing focus) releases.
       @captured       = false
       @focused        = true
+      # Set false so the first MS_LEFT after window-open captures
+      # without also firing. Flips true once MS_LEFT has been released
+      # at least once while captured.
+      @mouse_fire_armed = false
 
       @bob_phase = 0.0
       @bob_amp   = 0.0
@@ -105,6 +109,8 @@ module Rubydoom
       @plats      = Plats.new(@map)
       @floors     = Floors.new(@map)
       @switches   = Switches.new(@map)
+      @switches.doors = @doors
+      @switches.plats = @plats
       @scrollers  = WallScrollers.new(@map)
       @sector_lights  = SectorLights.new(@map)
       @sector_effects = SectorEffects.new(@clipper)
@@ -262,6 +268,10 @@ module Rubydoom
       # Skip the first delta after capture — cursor was wherever the
       # user clicked, so the recenter would otherwise cause a yaw jump.
       @mouse_centered = false
+      # Don't let the captures-click also fire the weapon: the button
+      # is still held this tick. Wait for it to be released before
+      # the mouse counts as a fire source again.
+      @mouse_fire_armed = false
     end
 
     def release_mouse
@@ -344,9 +354,17 @@ module Rubydoom
     # *after* the first click — pressing mouse-left from "released"
     # captures the mouse but doesn't fire that tic).
     def handle_fire_button
+      ms_held = @captured && Gosu.button_down?(Gosu::MS_LEFT)
+      # The mouse only fires once the capture-click has been released.
+      # Re-arming on release means subsequent presses fire normally;
+      # without it, the click that captured the cursor would also dump
+      # a shot the same tic.
+      @mouse_fire_armed = true if @captured && !Gosu.button_down?(Gosu::MS_LEFT)
+      ms_fire = ms_held && @mouse_fire_armed
+
       down = Gosu.button_down?(Gosu::KB_LEFT_CONTROL) ||
              Gosu.button_down?(Gosu::KB_RIGHT_CONTROL) ||
-             (@captured && Gosu.button_down?(Gosu::MS_LEFT))
+             ms_fire
       # Dead player can't fire — the button is reserved for respawn,
       # which is edge-triggered in button_down.
       @weapons.fire_button = false if @player.dead?

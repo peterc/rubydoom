@@ -62,22 +62,33 @@ module Rubydoom
       @active.reject! { |_, p| p.state == :done }
     end
 
-    private
-
+    # Open lift on every sector with this tag. Used by both walk-
+    # trigger 88 (WR Lift) and switch 62 (SR Lift) — same plat
+    # behaviour, different trigger style. Returns true iff at least
+    # one sector was newly affected so the caller (Switches) can
+    # detect a real activation versus a no-op tag match.
     def activate_tag(tag)
+      fired = false
       @map.sectors.each do |s|
         next unless s.tag == tag
         existing = @active[s.object_id]
         if existing
-          existing.timer = PLAT_WAIT_TICS if existing.state == :waiting
+          if existing.state == :waiting
+            existing.timer = PLAT_WAIT_TICS
+            fired = true
+          end
           next
         end
         low  = lowest_neighbor_floor(s)
         high = s.floor_height
         next if low >= high
         @active[s.object_id] = Plat.new(s, high, low, :down, 0)
+        fired = true
       end
+      fired
     end
+
+    private
 
     # Lowest floor among sectors that share a two-sided linedef with this
     # one (excluding the sector itself). Mirrors P_FindLowestFloorSurrounding.

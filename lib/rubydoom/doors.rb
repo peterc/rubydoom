@@ -76,13 +76,29 @@ module Rubydoom
           emit_noise(player)
           return true
         end
-        # A solid line (one-sided or impassable) stops the ray cold —
-        # the use action can't reach anything behind it. Plain
-        # passable two-sided lines (doorsteps, sector dividers) we
-        # walk straight through.
         return false if !ld.two_sided? || ld.impassable?
       end
       false
+    end
+
+    # Remote-tag door trigger. Vanilla EV_DoDoor: open every sector
+    # whose tag matches, with the given door kind (:d1 stays open,
+    # :dr opens then closes after WAIT_TICS). Used by switch / walk
+    # triggers like type 103 (S1 Door Open Stay) and 2 (W1 Door
+    # Open Stay). Returns true if at least one sector was opened.
+    def open_tagged(tag, kind: :d1)
+      opened = false
+      @map.sectors.each do |sector|
+        next unless sector.tag == tag
+        next if @active[sector.object_id]
+        top = lowest_neighbor_ceiling(sector) - DOOR_GAP
+        next if top <= sector.floor_height
+        @active[sector.object_id] =
+          Door.new(sector, top, :opening, 0, kind)
+        play_door_sound(sector, :doropn)
+        opened = true
+      end
+      opened
     end
 
     def update_tic
