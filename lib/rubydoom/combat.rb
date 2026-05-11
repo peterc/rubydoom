@@ -272,11 +272,16 @@ module Rubydoom
         damage_amt = falloff_damage(cx, cy, source.x, source.y)
         source.take_damage(damage_amt) if damage_amt > 0
       end
-      # Damage every other live mobj within range (chain reactions for
-      # barrels; splash damage to monsters once they live here).
+      # Damage every other live mobj within range with the same
+      # linear falloff vanilla P_RadiusAttack uses — barrel does
+      # 128 max at point-blank, 0 at 128 units. This means a barrel
+      # can kill a POSS (20 HP) at up to ~100 units, take a SPOS
+      # (30 HP) out at ~96, and seriously hurt a TROO (60 HP) up
+      # close. Chain-detonation between barrels still works because
+      # barrels at near-zero distance take >>20 damage.
       @mobjs.select { |m| m != mobj && m.state == :alive }.each do |other|
-        d = Math.hypot(other.thing.x - cx, other.thing.y - cy)
-        damage(other, EXPLOSION_MAX_DAMAGE, source: source) if d < EXPLOSION_RADIUS
+        amt = falloff_damage(cx, cy, other.thing.x.to_f, other.thing.y.to_f)
+        damage(other, amt, source: source) if amt > 0
       end
     end
 
