@@ -17,34 +17,38 @@ module Rubydoom
   #   * type 62  — SR Lift (Lower Wait Raise, by tag). Repeatable
   #     switch variant of the WR walk-trigger lift (88) — same plat
   #     behaviour, just triggered by Use instead of crossing.
+  #   * type 20  — S1 Floor Raise To Next Higher (Change Tex & Type),
+  #     delegated to Floors. Used by switches in E1M3.
   class Switches
     USE_RANGE = 64.0
 
     S1_EXIT_LEVEL        = 11
     S1_DOOR_OPEN_STAY    = 103
     SR_LIFT_LOWER_RAISE  = 62
+    S1_FLOOR_RAISE_NEXT  = 20
 
     # Once-only switches (S1*) get their special_type cleared after
     # firing so they can't be re-used. Repeatable switches (SR*) leave
     # the special intact; we still swap the texture so the player gets
     # the click animation.
-    ONCE_ONLY = [S1_EXIT_LEVEL, S1_DOOR_OPEN_STAY].freeze
+    ONCE_ONLY = [S1_EXIT_LEVEL, S1_DOOR_OPEN_STAY, S1_FLOOR_RAISE_NEXT].freeze
 
     attr_reader :exit_requested
 
     def initialize(map)
       @map = map
       @exit_requested = false
-      @doors = nil
-      @plats = nil
-      @sound = nil
+      @doors  = nil
+      @plats  = nil
+      @floors = nil
+      @sound  = nil
       @listener = nil
     end
 
     # Late-bound to avoid initialization-order dependencies in Game#load_map.
     # `sound`/`listener` let the click play attenuated at the switch
     # position; without them we fall back to silent.
-    attr_writer :doors, :plats, :sound, :listener
+    attr_writer :doors, :plats, :floors, :sound, :listener
 
     def try_use(player)
       rad = player.angle * Math::PI / 180.0
@@ -60,6 +64,8 @@ module Rubydoom
             @doors&.open_tagged(ld.sector_tag, kind: :d1)
           when SR_LIFT_LOWER_RAISE
             @plats&.activate_tag(ld.sector_tag)
+          when S1_FLOOR_RAISE_NEXT
+            @floors&.handle_use(ld)
           end
         if fired
           # Capture the type before we clear it so the exit-switch

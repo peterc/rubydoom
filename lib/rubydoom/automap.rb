@@ -33,13 +33,14 @@ module Rubydoom
     def initialize(map, bsp: nil)
       @map = map
       @bsp = bsp
+      @fb  = Framebuffer.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT)
     end
 
     # mode: :lines (default) draws every linedef colored by wall type.
     #       :bsp draws only the segs, colored by front-to-back visit order
     #       from the player's position. Requires a Bsp to be passed in.
     def draw(player, mode: :lines)
-      fb = Framebuffer.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT)
+      fb = @fb
       fb.clear(*BACKGROUND)
 
       project = projector

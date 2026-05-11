@@ -98,10 +98,21 @@ module Rubydoom
       @colormap = colormap
       @sky      = sky
       @sprites  = sprites
+      # Per-renderer persistent framebuffer. Allocating it fresh every
+      # frame is ~163KB of String per tick — the dominant GC source
+      # before pooling. We just clear() in place at the top of draw().
+      @fb         = Framebuffer.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT)
+      # Same idea for the per-column clipping arrays and the drawseg /
+      # masked-seg lists. These were small but allocated every frame;
+      # reusing them takes another bite out of GC.
+      @top_clip    = Array.new(SCREEN_WIDTH, 0)
+      @bot_clip    = Array.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT - 1)
+      @drawsegs    = []
+      @masked_segs = []
     end
 
     def draw(player)
-      fb = Framebuffer.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT)
+      fb = @fb
       @player_angle_deg = player.angle
       # Sky pre-fill on the upper half: anything ceiling-visplane-shaped
       # that doesn't get emitted (because a near seg projects off-screen
@@ -128,11 +139,13 @@ module Rubydoom
       cos_a = Math.cos(angle)
       sin_a = Math.sin(angle)
 
-      top_clip   = Array.new(SCREEN_WIDTH, 0)
-      bot_clip   = Array.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT - 1)
+      top_clip   = @top_clip
+      bot_clip   = @bot_clip
+      top_clip.fill(0)
+      bot_clip.fill(PLAYFIELD_HEIGHT - 1)
       visplanes  = Visplanes.new(SCREEN_WIDTH)
-      @drawsegs    = []
-      @masked_segs = []
+      @drawsegs.clear
+      @masked_segs.clear
       open_columns = SCREEN_WIDTH
 
       @bsp.each_subsector_front_to_back(player.x, player.y) do |ssec_idx|

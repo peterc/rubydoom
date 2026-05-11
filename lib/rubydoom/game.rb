@@ -90,9 +90,10 @@ module Rubydoom
       @plats      = Plats.new(@map)
       @floors     = Floors.new(@map)
       @switches   = Switches.new(@map)
-      @switches.doors = @doors
-      @switches.plats = @plats
-      @switches.sound = @sound
+      @switches.doors  = @doors
+      @switches.plats  = @plats
+      @switches.floors = @floors
+      @switches.sound  = @sound
       @plats.sound = @sound
       @scrollers  = WallScrollers.new(@map)
       @sector_lights  = SectorLights.new(@map)

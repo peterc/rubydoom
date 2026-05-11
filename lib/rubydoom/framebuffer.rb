@@ -11,12 +11,24 @@ module Rubydoom
     def initialize(width, height)
       @width  = width
       @height = height
-      @rgba   = String.new("\x00".b * (width * height * BYTES_PER_PIXEL),
+      byte_count = width * height * BYTES_PER_PIXEL
+      @rgba   = String.new("\x00".b * byte_count,
                            encoding: Encoding::ASCII_8BIT)
+      # Cache of fully-filled clear strings keyed by RGBA tuple. Building
+      # one costs ~163KB of pack/`*` allocation; reusing it costs zero
+      # and turns clear() into an in-place String#replace.
+      @clear_templates = {}
     end
 
+    # In-place clear. The previous `clear` allocated a fresh w*h*4 byte
+    # String on every frame (`pack("C*") * pixel_count`), which was the
+    # single biggest contributor to GC pressure. We now keep a per-
+    # colour template around and just replace bytes from it.
     def clear(r, g, b, a = 255)
-      @rgba.replace([r, g, b, a].pack("C*") * (@width * @height))
+      template = (@clear_templates[[r, g, b, a]] ||=
+                  ([r, g, b, a].pack("C*") * (@width * @height))
+                    .force_encoding(Encoding::ASCII_8BIT))
+      @rgba.replace(template)
     end
 
     def set_pixel(x, y, r, g, b, a = 255)
