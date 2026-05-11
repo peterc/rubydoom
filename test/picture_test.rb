@@ -72,10 +72,6 @@ class PictureTest < Minitest::Test
     rgba = pic.to_rgba(pal)
     # Inspect the alpha channel — byte index (y*w + x)*4 + 3.
     found_transparent = false
-    rgba.bytesize.step(by: 4).each do |_|
-      # Walk every 4th byte from offset 3.
-    end
-    # Plain Ruby scan:
     (3...rgba.bytesize).step(4) do |i|
       if rgba.getbyte(i) == 0
         found_transparent = true
