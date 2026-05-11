@@ -30,6 +30,7 @@ module Rubydoom
       @map      = map
       @bsp      = bsp
       build_blockmap
+      @solid_things = collect_solid_things
     end
 
     # Returns [final_x, final_y] after attempting to move from (x0, y0)
@@ -69,6 +70,8 @@ module Rubydoom
     private
 
     def try_move(start_x, start_y, current_floor, x, y)
+      return false if thing_blocks?(start_x, start_y, x, y)
+
       r = PLAYER_RADIUS
       seen = nil
       each_linedef_near(x, y, r) do |ld_index|
@@ -105,6 +108,29 @@ module Rubydoom
         return false if opening_bot - current_floor > MAX_STEP
       end
       true
+    end
+
+    # AABB overlap of player vs each solid thing. Mirrors vanilla:
+    # corpses, pickups, the small candle, etc. have MF_SOLID clear and
+    # are walked through; everything else blocks. If the player already
+    # overlapped the thing at the START position, the move is allowed —
+    # otherwise a player spawned overlapping a prop would be stuck.
+    def thing_blocks?(start_x, start_y, x, y)
+      @solid_things.each do |tx, ty, tr|
+        range = PLAYER_RADIUS + tr
+        next if (x - tx).abs >= range || (y - ty).abs >= range
+        next if (start_x - tx).abs < range && (start_y - ty).abs < range
+        return true
+      end
+      false
+    end
+
+    def collect_solid_things
+      @map.things.filter_map do |t|
+        info = ThingTypes[t.type]
+        next unless info && info.solid
+        [t.x.to_f, t.y.to_f, info.radius.to_f]
+      end
     end
 
     # Cross product sign — returns 0 (front/right) or 1 (back/left).
