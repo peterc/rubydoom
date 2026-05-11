@@ -42,23 +42,35 @@ module Rubydoom
     # hard-code its constants here.
     def fill_column(fb, x, sy_top, sy_bottom, player_angle_deg,
                     half_width, focal_length, palette)
-      cam_x  = x - half_width
-      offset = Math.atan2(cam_x, focal_length) * 180.0 / Math::PI
-      world  = player_angle_deg - offset
+      cam_x      = x - half_width
+      yaw_offset = Math.atan2(cam_x, focal_length) * 180.0 / Math::PI
+      world      = player_angle_deg - yaw_offset
       # 90° = one full texture cycle. floor and modulo so the texture
       # tiles cleanly across the seam at screen centre.
       u = (world * @tex_w / 90.0).floor % @tex_w
       col_data = @texture.columns[u]
-      pal = palette.colors
+      pal      = palette.colors
+
+      # Direct framebuffer write: hoist rgba string and per-row offset
+      # increment out of the inner loop. Same shape as the wall
+      # rasterizer — set_pixel was a per-pixel call before.
+      fb_w   = fb.width
+      rgba   = fb.rgba
+      stride = fb_w * 4
+      offset = (sy_top * fb_w + x) * 4
 
       sy = sy_top
       while sy <= sy_bottom
         idx = col_data[sy % @tex_h]
         if idx && idx >= 0
           rgb = pal[idx]
-          fb.set_pixel(x, sy, rgb[0], rgb[1], rgb[2])
+          rgba.setbyte(offset,     rgb[0])
+          rgba.setbyte(offset + 1, rgb[1])
+          rgba.setbyte(offset + 2, rgb[2])
+          rgba.setbyte(offset + 3, 255)
         end
-        sy += 1
+        sy     += 1
+        offset += stride
       end
     end
   end

@@ -109,6 +109,12 @@ module Rubydoom
       @bot_clip    = Array.new(SCREEN_WIDTH, PLAYFIELD_HEIGHT - 1)
       @drawsegs    = []
       @masked_segs = []
+      # Row-major span scratchpad for visplane rasterization. Each
+      # entry is a flat array of [x_start, x_end, x_start', x_end', ...]
+      # pairs of inclusive x ranges, built once per plane in column-
+      # ascending order so adjacent columns extend the previous pair
+      # in place. Cleared and reused for every plane.
+      @row_spans   = Array.new(PLAYFIELD_HEIGHT) { [] }
     end
 
     def draw(player)
@@ -808,15 +814,26 @@ module Rubydoom
       # too — pick it once.
       row = @colormap.row_for(light, contrast, z)
 
+      # Direct framebuffer write: hoist rgba string and per-row offset
+      # increment out of the inner loop. set_pixel was a measurable
+      # self-time hotspot at per-pixel granularity.
+      rgba   = fb.rgba
+      stride = SCREEN_WIDTH * 4
+      offset = (sy_top * SCREEN_WIDTH + x) * 4
+
       sy = sy_top
       while sy <= sy_bottom
         idx = col_data[v.floor % tex_h]
         if idx && idx >= 0
           rgb = @colormap.shaded(row, idx)
-          fb.set_pixel(x, sy, rgb[0], rgb[1], rgb[2])
+          rgba.setbyte(offset,     rgb[0])
+          rgba.setbyte(offset + 1, rgb[1])
+          rgba.setbyte(offset + 2, rgb[2])
+          rgba.setbyte(offset + 3, 255)
         end
-        v  += step_v
-        sy += 1
+        v      += step_v
+        sy     += 1
+        offset += stride
       end
     end
 
@@ -891,71 +908,77 @@ module Rubydoom
       end
     end
 
+    # Visplane rasterizer. Row-major: walk plane.columns once to
+    # materialize per-row span lists, then iterate rows and emit
+    # contiguous x-runs directly into the framebuffer's underlying
+    # byte string. No column_covers? scan in the inner loop, no
+    # fb.set_pixel call per pixel — both were sizable self-time
+    # contributors before this pass.
     def draw_plane(fb, plane, eye_y, player, cos_a, sin_a)
-      pixels    = plane.flat.pixels
-      cols      = plane.columns
-      ceiling   = plane.ceiling
-      light     = plane.light
-      dy_world  = (plane.height - eye_y).abs
+      pixels   = plane.flat.pixels
+      ceiling  = plane.ceiling
+      light    = plane.light
+      dy_world = (plane.height - eye_y).abs
       return if dy_world < 0.5
 
-      min_top = nil
-      max_bot = nil
-      cols.each do |list|
-        next unless list
-        list.each do |range|
-          min_top = range[0] if min_top.nil? || range[0] < min_top
-          max_bot = range[1] if max_bot.nil? || range[1] > max_bot
-        end
-      end
-      return unless min_top
+      rows = @row_spans
+      min_sy, max_sy = build_row_spans!(plane, rows)
+      return if min_sy.nil?
 
-      sy = min_top
-      while sy <= max_bot
+      rgba   = fb.rgba
+      stride = SCREEN_WIDTH * 4
+
+      sy = min_sy
+      while sy <= max_sy
+        spans = rows[sy]
+        if spans.empty?
+          sy += 1
+          next
+        end
+
         sy_offset = ceiling ? (HALF_HEIGHT - sy) : (sy - HALF_HEIGHT)
         if sy_offset <= 0
           sy += 1
           next
         end
 
-        z      = dy_world * FOCAL_LENGTH / sy_offset
-        scale  = z / FOCAL_LENGTH
+        z     = dy_world * FOCAL_LENGTH / sy_offset
+        scale = z / FOCAL_LENGTH
 
         base_world_x = player.x + z * cos_a
         base_world_y = player.y + z * sin_a
         step_x       = scale * sin_a
         step_y       = -scale * cos_a
 
-        # Z is constant for this row of the visplane, so colormap row
-        # is too. Visplanes don't get fake contrast — that's a
-        # wall-only trick.
-        row = @colormap.row_for(light, 0, z)
+        # Z is constant across this whole row, so the colormap row is
+        # too. Visplanes don't get fake contrast — that's a wall-only
+        # trick.
+        row_idx = @colormap.row_for(light, 0, z)
 
-        sx = 0
-        while sx < SCREEN_WIDTH
-          while sx < SCREEN_WIDTH
-            break if column_covers?(cols[sx], sy)
-            sx += 1
-          end
-          break if sx >= SCREEN_WIDTH
-
-          run_start = sx
-          while sx < SCREEN_WIDTH
-            break unless column_covers?(cols[sx], sy)
-            sx += 1
-          end
-          run_end = sx - 1
+        sy_stride = sy * stride
+        i = 0
+        n = spans.length
+        while i < n
+          run_start = spans[i]
+          run_end   = spans[i + 1]
+          i += 2
 
           world_x = base_world_x + (run_start - HALF_WIDTH) * step_x
           world_y = base_world_y + (run_start - HALF_WIDTH) * step_y
-          sxi = run_start
+
+          offset = sy_stride + run_start * 4
+          sxi    = run_start
           while sxi <= run_end
             idx = pixels.getbyte(((world_y.floor & 63) << 6) | (world_x.floor & 63))
-            rgb = @colormap.shaded(row, idx)
-            fb.set_pixel(sxi, sy, rgb[0], rgb[1], rgb[2])
+            rgb = @colormap.shaded(row_idx, idx)
+            rgba.setbyte(offset,     rgb[0])
+            rgba.setbyte(offset + 1, rgb[1])
+            rgba.setbyte(offset + 2, rgb[2])
+            rgba.setbyte(offset + 3, 255)
             world_x += step_x
             world_y += step_y
-            sxi += 1
+            sxi    += 1
+            offset += 4
           end
         end
 
@@ -963,12 +986,49 @@ module Rubydoom
       end
     end
 
-    def column_covers?(list, sy)
-      return false unless list
-      list.each do |range|
-        return true if range[0] <= sy && sy <= range[1]
+    # Convert a plane's column-major coverage list into the supplied
+    # row-major scratchpad. Each rows[sy] becomes a flat array
+    # [x1, x2, x1', x2', ...] of inclusive x ranges in column-ascending
+    # order. Adjacent columns extend the open run in place, so the
+    # common contiguous case is one pair per row. Returns [min_sy,
+    # max_sy] across all covered rows, or [nil, nil] if empty.
+    def build_row_spans!(plane, rows)
+      cols   = plane.columns
+      min_sy = nil
+      max_sy = nil
+
+      # Reset only the rows we know we'll touch — clearing all
+      # PLAYFIELD_HEIGHT every plane is fine (it's just nil-out on
+      # short arrays) but it's cheaper to track dirty rows for the
+      # next plane. We do clear everything here for simplicity; the
+      # cost is negligible compared to the rasterizer.
+      rows.each(&:clear)
+
+      x = 0
+      while x < SCREEN_WIDTH
+        list = cols[x]
+        if list
+          list.each do |range|
+            top = range[0]
+            bot = range[1]
+            sy = top
+            while sy <= bot
+              spans = rows[sy]
+              if !spans.empty? && spans[-1] == x - 1
+                spans[-1] = x       # extend run_end of the open pair
+              else
+                spans << x << x     # new pair [x, x]
+              end
+              sy += 1
+            end
+            min_sy = top if min_sy.nil? || top < min_sy
+            max_sy = bot if max_sy.nil? || bot > max_sy
+          end
+        end
+        x += 1
       end
-      false
+
+      [min_sy, max_sy]
     end
 
     # ----- helpers -----

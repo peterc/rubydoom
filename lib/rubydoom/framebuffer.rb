@@ -7,6 +7,11 @@ module Rubydoom
     BYTES_PER_PIXEL = 4
 
     attr_reader :width, :height
+    # Raw byte buffer (RGBA, row-major). Exposed so hot rasterizers can
+    # write directly via String#setbyte and skip the per-pixel
+    # set_pixel method call + bounds check. Caller is responsible for
+    # staying inside [0, width*height*4).
+    attr_reader :rgba
 
     def initialize(width, height)
       @width  = width
