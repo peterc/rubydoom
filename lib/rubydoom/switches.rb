@@ -30,7 +30,9 @@ module Rubydoom
     USE_RANGE = 64.0
 
     S1_EXIT_LEVEL        = 11
+    S1_EXIT_SECRET       = 51
     S1_DOOR_OPEN_STAY    = 103
+    SR_DOOR_OPEN_CLOSE   = 63
     SR_LIFT_LOWER_RAISE  = 62
     S1_FLOOR_RAISE_NEXT  = 20
     S1_DONUT             = 9
@@ -41,14 +43,16 @@ module Rubydoom
     # leave the special intact; we still swap the texture so the
     # player gets the click animation.
     ONCE_ONLY = [
-      S1_EXIT_LEVEL, S1_DOOR_OPEN_STAY, S1_FLOOR_RAISE_NEXT, S1_DONUT,
+      S1_EXIT_LEVEL, S1_EXIT_SECRET, S1_DOOR_OPEN_STAY, S1_FLOOR_RAISE_NEXT,
+      S1_DONUT,
     ].freeze
 
-    attr_reader :exit_requested
+    attr_reader :exit_requested, :secret_exit_requested
 
     def initialize(map)
       @map = map
       @exit_requested = false
+      @secret_exit_requested = false
       @doors  = nil
       @plats  = nil
       @floors = nil
@@ -72,8 +76,14 @@ module Rubydoom
           when S1_EXIT_LEVEL
             @exit_requested = true
             true
+          when S1_EXIT_SECRET
+            @exit_requested = true
+            @secret_exit_requested = true
+            true
           when S1_DOOR_OPEN_STAY
             @doors&.open_tagged(ld.sector_tag, kind: :d1)
+          when SR_DOOR_OPEN_CLOSE
+            @doors&.open_tagged(ld.sector_tag, kind: :dr)
           when SR_LIFT_LOWER_RAISE
             @plats&.activate_tag(ld.sector_tag)
           when S1_FLOOR_RAISE_NEXT
@@ -84,7 +94,8 @@ module Rubydoom
         if fired
           # Capture the type before we clear it so the exit-switch
           # picks the louder, more emphatic `dsswtchx` sample.
-          play_switch_sound(ld, ld.special_type == S1_EXIT_LEVEL ? :swtchx : :swtchn)
+          exit_switch = [S1_EXIT_LEVEL, S1_EXIT_SECRET].include?(ld.special_type)
+          play_switch_sound(ld, exit_switch ? :swtchx : :swtchn)
           swap_switch_texture(ld)
           ld.special_type = 0 if ONCE_ONLY.include?(ld.special_type)
           return true

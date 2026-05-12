@@ -53,6 +53,22 @@ module Rubydoom
       @lights.each { |l| step(l) }
     end
 
+    # Walk-trigger linedef type 35: snap every sector with the given
+    # tag to light_level 35 (vanilla "0 minus 8 + 35"). Drop any
+    # active strobe/flash/glow effect on those sectors so it doesn't
+    # immediately overwrite the new level next tic. Returns true if
+    # at least one sector matched (so the caller can clear W1).
+    def set_tag_light(tag, level)
+      hit = false
+      @map.sectors.each do |s|
+        next unless s.tag == tag
+        s.light_level = level
+        @lights.reject! { |l| l.sector == s }
+        hit = true
+      end
+      hit
+    end
+
     private
 
     def collect_lights

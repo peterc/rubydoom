@@ -232,12 +232,24 @@ module Rubydoom
 
     # ---------- A_FaceTarget ----------
 
-    # Snap angle to point at the current target.
+    # Vanilla MF_SHADOW fuzz when the target is invisible. P_Random()
+    # range -255..+255 multiplied by 1<<21 BAM ≈ ±22.5° in worst case;
+    # we sample uniformly in ±FUZZ_DEG_MAX for the same gameplay feel
+    # (some attacks go wide, ranged combat becomes much harder).
+    FUZZ_DEG_MAX = 22.5
+
+    # Snap angle to point at the current target. When the target is
+    # the player and they have invisibility (blursphere) active, the
+    # aim is perturbed — this falls through to every monster attack
+    # that uses `mobj.thing.angle` (hitscan and projectile alike).
     def a_face_target(mobj, _player)
       return unless mobj.target
       tx = mobj.target.x
       ty = mobj.target.y
       ang = Math.atan2(ty - mobj.thing.y, tx - mobj.thing.x) * 180.0 / Math::PI
+      if mobj.target.respond_to?(:has_power?) && mobj.target.has_power?(:invisibility)
+        ang += (@rng.rand - 0.5) * 2 * FUZZ_DEG_MAX
+      end
       mobj.thing.angle = ang % 360.0
     end
 

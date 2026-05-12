@@ -55,7 +55,8 @@ module Rubydoom
                       :weapons_owned,
                       :pending_weapon,
                       :god_mode,
-                      :damage_count, :bonus_count) do
+                      :damage_count, :bonus_count,
+                      :powers) do
     DEFAULT_MAX_HEALTH = 100
     SOULSPHERE_MAX     = 200
     DEFAULT_MAX_ARMOR  = 200
@@ -122,7 +123,30 @@ module Rubydoom
           DEFAULT_WEAPONS.dup,
           nil,
           false,
-          0, 0)
+          0, 0,
+          empty_powers)
+    end
+
+    # Powerup duration in tics. Vanilla constants from p_pspr.c:
+    # IRONTICS = INVISTICS = 60 * 35 (60 sec); INVULNTICS = 30 * 35;
+    # INFRATICS = 120 * 35; berserk and computer-map last the level.
+    POWER_DURATIONS = {
+      radsuit:        60 * 35,
+      invisibility:   60 * 35,
+      invulnerability: 30 * 35,
+      light_amp:     120 * 35,
+    }.freeze
+
+    # Tic threshold under which the powerup's screen-tint pulses on
+    # alternating frames as an "about to expire" warning (vanilla
+    # `4*32` tics ≈ 3.6 sec).
+    POWER_FADE_TICS = 4 * 32
+
+    def self.empty_powers
+      { radsuit:         0,
+        invisibility:    0,
+        invulnerability: 0,
+        light_amp:       0 }
     end
 
     # Fresh key inventory: no colour, no variant.
@@ -223,6 +247,7 @@ module Rubydoom
       DEFAULT_MAX_AMMO.each { |k, v| self.max_ammo[k] = v }
       self.damage_count = 0
       self.bonus_count  = 0
+      self.powers = self.class.empty_powers
     end
 
     # Count for the current weapon's ammo type, or nil for melee.
@@ -279,6 +304,26 @@ module Rubydoom
       self.bonus_count  = bonus_count  - 1 if bonus_count  > 0
     end
 
+    # Per-tic decay for powerups. Each entry is a tic counter; when
+    # it reaches zero the power has expired.
+    def tic_powers!
+      powers.each_key { |k| powers[k] -= 1 if powers[k] > 0 }
+    end
+
+    # Pickup grants. Setting to the duration unconditionally mirrors
+    # vanilla P_GivePower (a fresh pickup resets the timer regardless
+    # of any remaining time). Returns true if a duration is known —
+    # callers use it to decide whether the item was absorbed.
+    def grant_power(name)
+      tics = POWER_DURATIONS[name] or return false
+      powers[name] = tics
+      true
+    end
+
+    def has_power?(name)
+      powers[name] > 0
+    end
+
     # Translucent RGBA overlay color for the current frame, or nil if no
     # tint is active. Red flash dominates a yellow one — vanilla applies
     # them in the same priority order (damage trumps bonus). The math
@@ -291,6 +336,15 @@ module Rubydoom
       bonus = (bonus_count + 7) >> 3
       bonus = 4 if bonus > 4
       return [215, 186, 69, bonus * 12] if bonus > 0
+
+      # Radiation-suit green. Vanilla uses STARTPOISONPALS to bias the
+      # whole palette green; we approximate with a translucent overlay.
+      # During the final POWER_FADE_TICS the tint blinks on alternate
+      # tics as the "about to expire" warning.
+      if powers[:radsuit] > 0
+        return nil if powers[:radsuit] < POWER_FADE_TICS && powers[:radsuit].odd?
+        return [0, 200, 0, 40]
+      end
 
       nil
     end

@@ -46,7 +46,7 @@ module Rubydoom
     attr_reader :wad, :palette, :colormap, :graphics,
                 :textures, :sprites, :flats,
                 :map, :bsp, :clipper,
-                :doors, :plats, :floors, :donuts, :switches, :scrollers,
+                :doors, :plats, :floors, :donuts, :stairs, :switches, :scrollers,
                 :sector_lights, :sector_effects, :pickups,
                 :noise_alert, :combat, :sight,
                 :monster_movement, :monster_ai, :projectiles,
@@ -95,6 +95,7 @@ module Rubydoom
       @plats      = Plats.new(@map)
       @floors     = Floors.new(@map)
       @donuts     = Donuts.new(@map)
+      @stairs     = Stairs.new(@map)
       @switches   = Switches.new(@map)
       @switches.doors  = @doors
       @switches.plats  = @plats
@@ -168,6 +169,7 @@ module Rubydoom
       @plats.update_tic
       @floors.update_tic
       @donuts.update_tic
+      @stairs.update_tic
       @scrollers.update_tic
       @sector_lights.update_tic
       @sector_effects.update_tic(@player)
@@ -182,6 +184,7 @@ module Rubydoom
       @hud&.update_tic(@player)
       handle_edges(input.edges)
       @player.tic_screen_tints!
+      @player.tic_powers!
     end
 
     # Respawn at the map's player_start. Single-player vanilla restarts
@@ -234,12 +237,25 @@ module Rubydoom
     # linedef the player crossed in the last successful slide. W1
     # (once-only) handlers clear special_type so the trigger can't
     # re-fire; WR handlers leave it intact.
+    W1_LIGHT_TO_35   = 35
+    W1_STAIRS_BUILD  = 8
+
     def handle_walk_cross(ld)
       fired =
         if @plats.handle_cross(ld)
           true  # WR — leave special intact.
         elsif @floors.handle_cross(ld)
           ld.special_type = 0  # W1 — consumed.
+          true
+        elsif (door_result = @doors.handle_cross(ld))
+          ld.special_type = 0 if door_result == :w1
+          true
+        elsif ld.special_type == W1_STAIRS_BUILD && @stairs.handle_cross(ld)
+          ld.special_type = 0
+          true
+        elsif ld.special_type == W1_LIGHT_TO_35
+          @sector_lights.set_tag_light(ld.sector_tag, 35)
+          ld.special_type = 0
           true
         else
           false

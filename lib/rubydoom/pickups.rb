@@ -27,6 +27,7 @@ module Rubydoom
     # armor, keys, backpack) gets `dsitemup`. Powerups, when we have
     # them, will play `dsgetpow` — none of those types appear here yet.
     WEAPON_DOOMEDNUMS = [2001, 2002, 2003, 2004, 2005].freeze
+    POWERUP_DOOMEDNUMS = [2024, 2025].freeze
 
     def initialize(map)
       @map     = map
@@ -110,6 +111,10 @@ module Rubydoom
       when 2003 then player.pickup_weapon(:rocket)                  # rocket launcher
       when 2004 then player.pickup_weapon(:plasma)                  # plasma rifle
       when 2005 then player.pickup_weapon(:chainsaw)                # chainsaw
+
+      # ---- Powerups ----
+      when 2024 then player.grant_power(:invisibility)              # blursphere
+      when 2025 then player.grant_power(:radsuit)                   # radsuit / biosuit
       else
         false
       end
@@ -121,7 +126,14 @@ module Rubydoom
 
     def play_pickup_sound(thing)
       return unless @sound
-      name = WEAPON_DOOMEDNUMS.include?(thing.type) ? :wpnup : :itemup
+      name =
+        if WEAPON_DOOMEDNUMS.include?(thing.type)
+          :wpnup
+        elsif POWERUP_DOOMEDNUMS.include?(thing.type)
+          :getpow
+        else
+          :itemup
+        end
       # Pickup happens at point-blank range; just play at full volume.
       @sound.play(name)
     end
@@ -132,6 +144,7 @@ module Rubydoom
       2007, 2048, 2008, 2049, 2046, 2047, 17, 8, # ammo + backpack
       5, 6, 13, 38, 39, 40,                     # keys (cards + skulls)
       2001, 2002, 2003, 2004, 2005,             # weapons (shotgun/chaingun/rocket/plasma/chainsaw)
+      2024, 2025,                                # powerups (blursphere, radsuit)
     ].freeze
   end
 end

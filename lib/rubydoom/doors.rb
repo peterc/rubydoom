@@ -81,6 +81,21 @@ module Rubydoom
       false
     end
 
+    # Walk-trigger dispatch — vanilla W1/WR door specials. Returns
+    # `:w1` for once-only (caller clears special_type), `:wr` for
+    # repeatable, or nil if the linedef isn't a recognised door
+    # trigger. Currently:
+    #   * type 2  — W1 Door Open Stay (remote by tag)
+    #   * type 90 — WR Door Open Stay (remote by tag, repeatable)
+    def handle_cross(linedef)
+      case linedef.special_type
+      when 2  # W1 Door Open Stay
+        open_tagged(linedef.sector_tag, kind: :d1) ? :w1 : nil
+      when 90 # WR Door Open Stay
+        open_tagged(linedef.sector_tag, kind: :d1) ? :wr : nil
+      end
+    end
+
     # Remote-tag door trigger. Vanilla EV_DoDoor: open every sector
     # whose tag matches, with the given door kind (:d1 stays open,
     # :dr opens then closes after WAIT_TICS). Used by switch / walk

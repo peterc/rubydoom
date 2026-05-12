@@ -360,16 +360,16 @@ module Rubydoom
 
     private
 
-    # On exit-switch fire, jump straight to whichever map's marker
-    # lump comes next in the WAD directory (no intermission yet).
-    # For doom1.wad the lumps happen to be stored in vanilla play
-    # order, so this matches the intended progression; custom WADs
-    # may sequence differently.
+    # On exit-switch fire, jump to the next map. Normal exits walk
+    # forward in the WAD directory (`doom1.wad` happens to store the
+    # lumps in vanilla play order). Secret exits in E1Mx jump to
+    # ExM9 — vanilla's hand-coded secret-level routing, which the
+    # WAD directory alone doesn't encode.
     def announce_exit_if_pending
       return if @exit_announced
       return unless @game.switches.exit_requested
       @exit_announced = true
-      next_name = Map.next_in_wad(@game.wad, @game.map.name)
+      next_name = pick_next_map
       if next_name
         puts "[exit] #{@game.map.name} → #{next_name}"
         # Bake the current scene into a real texture (Gosu.render, not
@@ -381,6 +381,15 @@ module Rubydoom
       else
         puts "[exit] no further map after #{@game.map.name}"
       end
+    end
+
+    def pick_next_map
+      cur = @game.map.name
+      if @game.switches.secret_exit_requested && cur =~ /\AE(\d)M\d\z/
+        secret = "E#{$1}M9"
+        return secret if @game.wad.lump(secret)
+      end
+      Map.next_in_wad(@game.wad, cur)
     end
 
     def render_scene

@@ -59,7 +59,8 @@ module Rubydoom
       Info.new(doomednum: 2019, sprite: "ARM2", frame: "A", radius: 20, solid: false),  # blue armor
 
       # Powerups — pickups.
-      Info.new(doomednum: 2024, sprite: "PINS", frame: "A", radius: 20, solid: false),  # invisibility
+      Info.new(doomednum: 2024, sprite: "PINS", frame: "A", radius: 20, solid: false),  # invisibility (blursphere)
+      Info.new(doomednum: 2025, sprite: "SUIT", frame: "A", radius: 20, solid: false),  # radsuit / biosuit
 
       # Keys — pickups. Both card (flat) and skull variants of each
       # colour exist; doom1 door specials accept either.

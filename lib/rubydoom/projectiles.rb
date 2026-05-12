@@ -121,11 +121,18 @@ module Rubydoom
       dist = 1.0 if dist < 1.0
       time_to_target = dist / IMP_FIREBALL_SPEED
 
-      vx = IMP_FIREBALL_SPEED * dx / dist
-      vy = IMP_FIREBALL_SPEED * dy / dist
+      # Vanilla P_SpawnMissile MF_SHADOW perturbation — when firing at
+      # an invisible target the XY angle is randomly fuzzed up to
+      # ±22.5°. Vertical aim (slope) is unaffected.
+      ang_rad = Math.atan2(dy, dx)
+      if target.respond_to?(:has_power?) && target.has_power?(:invisibility)
+        ang_rad += (@rng.rand - 0.5) * 2 * (22.5 * Math::PI / 180.0)
+      end
+      vx = IMP_FIREBALL_SPEED * Math.cos(ang_rad)
+      vy = IMP_FIREBALL_SPEED * Math.sin(ang_rad)
       vz = (tz - sz) / time_to_target
 
-      angle = Math.atan2(dy, dx) * 180.0 / Math::PI
+      angle = ang_rad * 180.0 / Math::PI
 
       thing = Map::Thing.new(sx, sy, angle, 0, 0, false, "BAL1", "A", false, sz)
       proj  = Proj.new(thing, owner_mobj, sz, vx, vy, vz,
