@@ -19,6 +19,13 @@ module Rubydoom
   #     behaviour, just triggered by Use instead of crossing.
   #   * type 20  — S1 Floor Raise To Next Higher (Change Tex & Type),
   #     delegated to Floors. Used by switches in E1M3.
+  #   * type 9   — S1 Donut, delegated to Donuts. Used in E1M2's
+  #     nukage-ring secret.
+  #
+  # Gun-trigger specials (G*) come in through `try_shoot` instead of
+  # `try_use`. They share the texture-swap and once-only machinery:
+  #   * type 46  — GR Door Open Stay (remote). Repeatable; bullets
+  #     against the linedef open every sector with the matching tag.
   class Switches
     USE_RANGE = 64.0
 
@@ -26,12 +33,16 @@ module Rubydoom
     S1_DOOR_OPEN_STAY    = 103
     SR_LIFT_LOWER_RAISE  = 62
     S1_FLOOR_RAISE_NEXT  = 20
+    S1_DONUT             = 9
+    GR_DOOR_OPEN_STAY    = 46
 
     # Once-only switches (S1*) get their special_type cleared after
-    # firing so they can't be re-used. Repeatable switches (SR*) leave
-    # the special intact; we still swap the texture so the player gets
-    # the click animation.
-    ONCE_ONLY = [S1_EXIT_LEVEL, S1_DOOR_OPEN_STAY, S1_FLOOR_RAISE_NEXT].freeze
+    # firing so they can't be re-used. Repeatable switches (SR*/GR*)
+    # leave the special intact; we still swap the texture so the
+    # player gets the click animation.
+    ONCE_ONLY = [
+      S1_EXIT_LEVEL, S1_DOOR_OPEN_STAY, S1_FLOOR_RAISE_NEXT, S1_DONUT,
+    ].freeze
 
     attr_reader :exit_requested
 
@@ -41,6 +52,7 @@ module Rubydoom
       @doors  = nil
       @plats  = nil
       @floors = nil
+      @donuts = nil
       @sound  = nil
       @listener = nil
     end
@@ -48,7 +60,7 @@ module Rubydoom
     # Late-bound to avoid initialization-order dependencies in Game#load_map.
     # `sound`/`listener` let the click play attenuated at the switch
     # position; without them we fall back to silent.
-    attr_writer :doors, :plats, :floors, :sound, :listener
+    attr_writer :doors, :plats, :floors, :donuts, :sound, :listener
 
     def try_use(player)
       rad = player.angle * Math::PI / 180.0
@@ -66,6 +78,8 @@ module Rubydoom
             @plats&.activate_tag(ld.sector_tag)
           when S1_FLOOR_RAISE_NEXT
             @floors&.handle_use(ld)
+          when S1_DONUT
+            @donuts&.handle_use(ld)
           end
         if fired
           # Capture the type before we clear it so the exit-switch
@@ -78,6 +92,23 @@ module Rubydoom
         return false if !ld.two_sided? || ld.impassable?
       end
       false
+    end
+
+    # Gun-trigger dispatcher. Called by Weapons when a hitscan's
+    # nearest blocking line carries a G* special. Mirrors try_use's
+    # texture-swap / sound / once-only handling. Returns true iff the
+    # special fired.
+    def try_shoot(ld)
+      fired =
+        case ld.special_type
+        when GR_DOOR_OPEN_STAY
+          @doors&.open_tagged(ld.sector_tag, kind: :d1)
+        end
+      return false unless fired
+      play_switch_sound(ld, :swtchn)
+      swap_switch_texture(ld)
+      ld.special_type = 0 if ONCE_ONLY.include?(ld.special_type)
+      true
     end
 
     private

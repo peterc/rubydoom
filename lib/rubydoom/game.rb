@@ -46,7 +46,7 @@ module Rubydoom
     attr_reader :wad, :palette, :colormap, :graphics,
                 :textures, :sprites, :flats,
                 :map, :bsp, :clipper,
-                :doors, :plats, :floors, :switches, :scrollers,
+                :doors, :plats, :floors, :donuts, :switches, :scrollers,
                 :sector_lights, :sector_effects, :pickups,
                 :noise_alert, :combat, :sight,
                 :monster_movement, :monster_ai, :projectiles,
@@ -94,10 +94,12 @@ module Rubydoom
       @doors      = Doors.new(@map)
       @plats      = Plats.new(@map)
       @floors     = Floors.new(@map)
+      @donuts     = Donuts.new(@map)
       @switches   = Switches.new(@map)
       @switches.doors  = @doors
       @switches.plats  = @plats
       @switches.floors = @floors
+      @switches.donuts = @donuts
       @switches.sound  = @sound
       @plats.sound = @sound
       @scrollers  = WallScrollers.new(@map)
@@ -132,6 +134,7 @@ module Rubydoom
                                 sound: @sound, noise_alert: @noise_alert,
                                 rng: @rng)
       @weapons.clipper = @clipper
+      @weapons.wall_hit_handler = method(:handle_gun_cross)
       @hud.weapons = @weapons if @hud
 
       @last_player_health = @player.health
@@ -163,6 +166,7 @@ module Rubydoom
       @doors.update_tic
       @plats.update_tic
       @floors.update_tic
+      @donuts.update_tic
       @scrollers.update_tic
       @sector_lights.update_tic
       @sector_effects.update_tic(@player)
@@ -244,6 +248,16 @@ module Rubydoom
       # enough to wake monsters in the destination room (lift starting
       # up, floor lowering, walk-trigger door opening). Same alert
       # path as a gunshot.
+      sec_index = @clipper.sector_index_at(@player.x, @player.y)
+      @noise_alert.alert(@player, sec_index)
+    end
+
+    # Gun-trigger dispatch. Weapons calls this for the nearest
+    # blocking line of a hitscan when that line has a special. Type 46
+    # (GR Door Open Stay) is currently the only gun-trigger we
+    # recognise; the click + a noise alert run if it fires.
+    def handle_gun_cross(ld)
+      return unless @switches.try_shoot(ld)
       sec_index = @clipper.sector_index_at(@player.x, @player.y)
       @noise_alert.alert(@player, sec_index)
     end

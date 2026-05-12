@@ -6,7 +6,9 @@ module Rubydoom
   #
   # Returns one of:
   #   [:thing, thing, x, y]  — bullet hit a shootable (barrel, monster)
-  #   [:wall,  x, y]         — bullet hit a wall first
+  #   [:wall,  x, y, ld]     — bullet hit a wall first (ld is the
+  #                             blocking linedef, so callers can dispatch
+  #                             gun-trigger specials like type 46)
   #   nil                    — out of range, nothing hit
   #
   # Vertical aim is auto-computed (vanilla P_AimLineAttack + P_LineAttack):
@@ -55,6 +57,7 @@ module Rubydoom
 
       best_t   = range
       best_hit = nil
+      best_ld  = nil
 
       @map.linedefs.each do |ld|
         t = ray_linedef_t(player.x, player.y, dx, dy, ld)
@@ -62,6 +65,7 @@ module Rubydoom
         next unless blocks_bullet_at?(ld, eye + aim_slope * t)
         best_t   = t
         best_hit = :wall
+        best_ld  = ld
       end
 
       shootables&.each do |thing, tr, th|
@@ -74,12 +78,13 @@ module Rubydoom
         next if th && (z_at < floor || z_at > floor + th)
         best_t   = t
         best_hit = thing
+        best_ld  = nil
       end
 
       return nil if best_hit.nil?
       hx = player.x + dx * best_t
       hy = player.y + dy * best_t
-      best_hit == :wall ? [:wall, hx, hy] : [:thing, best_hit, hx, hy]
+      best_hit == :wall ? [:wall, hx, hy, best_ld] : [:thing, best_hit, hx, hy]
     end
 
     private

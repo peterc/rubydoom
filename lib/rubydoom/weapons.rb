@@ -142,6 +142,11 @@ module Rubydoom
     # any specific load_map flow.
     attr_writer :clipper
 
+    # Callback (lambda or method) invoked when a hitscan's nearest
+    # blocking line carries a non-zero special_type. Game wires this
+    # to its gun-trigger dispatch (type 46 GR doors, etc.).
+    attr_writer :wall_hit_handler
+
     # Lump name to render this frame. While firing, returns the current
     # frame's lump; otherwise returns the weapon's idle lump. `player`
     # is needed for the idle fallback (which weapon to look up).
@@ -279,9 +284,16 @@ module Rubydoom
                              range: range,
                              spread_deg: spread_deg,
                              shootables: @combat&.shootables)
-      return unless @combat && result && result[0] == :thing
-      mobj = @combat.mobj_for(result[1])
-      @combat.damage(mobj, damage, source: player) if mobj
+      return unless result
+      case result[0]
+      when :thing
+        return unless @combat
+        mobj = @combat.mobj_for(result[1])
+        @combat.damage(mobj, damage, source: player) if mobj
+      when :wall
+        ld = result[3]
+        @wall_hit_handler&.call(ld) if ld && ld.special_type != 0
+      end
     end
 
     def fire_pistol(player)
