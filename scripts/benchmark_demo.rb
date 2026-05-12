@@ -25,7 +25,7 @@ require_relative "../lib/rubydoom"
 
 demo_path = ARGV[0] or abort "Usage: ruby scripts/benchmark_demo.rb path/to/demo.rdm [wad]"
 abort "demo file not found: #{demo_path}" unless File.exist?(demo_path)
-wad_path  = ARGV[1] || File.expand_path("../doom1.wad", __dir__)
+wad_path  = ARGV[1] || File.expand_path("../wads/doom1.wad", __dir__)
 abort "wad not found: #{wad_path}" unless File.exist?(wad_path)
 
 Rubydoom::HeadlessRunner.new(wad_path: wad_path, demo_path: demo_path).run

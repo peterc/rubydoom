@@ -14,12 +14,12 @@ The point of the project is not to be a DOOM implementation to *play*, but to be
 
 ## Quick start in game mode
 
-You need Ruby (tested on 4.0.2 and 3.4.7 - or headlessly only on TruffleRuby 34), `bundle`, and, as mentioned above, a `DOOM1.WAD` (`doom1.wad` is also accepted as a filename) in the project root.
+You need Ruby (tested on 4.0.2 and 3.4.7 - or headlessly only on TruffleRuby 34), `bundle`, and, as mentioned above, a `DOOM1.WAD` (`doom1.wad` is also accepted as a filename) in the `wads/` directory (the project root is also searched for backwards compatibility).
 
 ```sh
 bundle install
-bin/rubydoom                          # play E1M1
-bin/rubydoom --map E1M3 doom1.wad     # play a different map / wad
+bin/rubydoom                            # play E1M1
+bin/rubydoom --map E1M3 wads/doom1.wad  # play a different map / wad
 ```
 
 Default controls: WASD or arrow keys to move, mouse to look (click in the window to capture the cursor, Esc to release), left-Ctrl or left-mouse to fire, Space to use, 1–7 to switch weapons, Tab toggles the automap, P prints the current world position to stdout for debugging purposes. Arrow keys can be used to rotate left/right, if you want to avoid using the mouse entirely.
@@ -62,7 +62,7 @@ Sample output:
 | --- | --- | --- |
 | `-m MAP` / `--map MAP` | `E1M1` | Map to load (e.g. `E1M2`, `E1M5`). |
 | `-h` / `--help` | — | Show usage and exit. |
-| `wad_path` (positional) | `./doom1.wad` | Path to a DOOM WAD. |
+| `wad_path` (positional) | `./wads/doom1.wad` (then `./doom1.wad`) | Path to a DOOM WAD. |
 
 ## Environment variables
 

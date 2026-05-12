@@ -3,7 +3,7 @@ require "minitest/autorun"
 require "rubydoom"
 
 module TestHelper
-  WAD_PATH = File.expand_path("../doom1.wad", __dir__)
+  WAD_PATH = File.expand_path("../wads/doom1.wad", __dir__)
 
   # The WAD is large to parse — share one across all tests. Each test
   # that wants a fresh Game still gets one (Game.new re-parses palette /

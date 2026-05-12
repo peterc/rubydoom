@@ -41,7 +41,7 @@ Rubydoom::App.const_set(:TITLE_HOLD_TICS, 0)
 puts "[profile] capturing #{DURATION}s into #{OUTPUT}"
 StackProf.run(mode: :cpu, raw: false, interval: 1000, out: OUTPUT) do
   Rubydoom::App.new(
-    wad_path: File.expand_path("../doom1.wad", __dir__),
+    wad_path: File.expand_path("../wads/doom1.wad", __dir__),
     map_name: "E1M1",
   ).show
 end

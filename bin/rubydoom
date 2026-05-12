@@ -21,23 +21,28 @@ parser.parse!
 # Look for the WAD under common case variations — id Software's
 # original ships as `DOOM1.WAD` (uppercase), the modern Steam / GOG
 # extracts come down as `doom1.wad` (lowercase), and at least one
-# distribution uses TitleCase. Try them in order and use the first
-# one that exists. Explicit positional arg always wins.
+# distribution uses TitleCase. We search the `wads/` subdirectory
+# first (the standard spot) and fall back to the project root for
+# backwards compatibility with existing checkouts. Explicit
+# positional arg always wins.
 WAD_CANDIDATES = %w[doom1.wad DOOM1.WAD Doom1.wad Doom1.WAD].freeze
+WAD_SEARCH_DIRS = %w[../wads ..].freeze
 
 def resolve_wad(arg)
   return arg if arg
-  WAD_CANDIDATES.each do |name|
-    path = File.expand_path("../#{name}", __dir__)
-    return path if File.exist?(path)
+  WAD_SEARCH_DIRS.each do |dir|
+    WAD_CANDIDATES.each do |name|
+      path = File.expand_path("#{dir}/#{name}", __dir__)
+      return path if File.exist?(path)
+    end
   end
   nil
 end
 
 wad_path = resolve_wad(ARGV[0])
 unless wad_path && File.exist?(wad_path)
-  abort "WAD not found (looked for #{WAD_CANDIDATES.join(" / ")} in " \
-        "the project root) — pass a path as the first arg"
+  abort "WAD not found (looked for #{WAD_CANDIDATES.join(" / ")} under " \
+        "#{WAD_SEARCH_DIRS.join(" or ")}) — pass a path as the first arg"
 end
 
 # Benchmark mode bypasses Gosu entirely. RUBYDOOM_PLAY is required —
