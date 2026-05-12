@@ -52,6 +52,13 @@ module Rubydoom
 
     attr_reader :exit_requested, :secret_exit_requested
 
+    # External request hook. Sector special 11 (end-of-level on death)
+    # uses this to trigger the same exit path a switch would.
+    def request_exit!(secret: false)
+      @exit_requested = true
+      @secret_exit_requested = true if secret
+    end
+
     def initialize(map)
       @map = map
       @exit_requested = false

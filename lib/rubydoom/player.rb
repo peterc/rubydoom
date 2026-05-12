@@ -135,6 +135,11 @@ module Rubydoom
       invisibility:   60 * 35,
       invulnerability: 30 * 35,
       light_amp:     120 * 35,
+      # Vanilla berserk "lasts the level": pw_strength holds the
+      # cumulative tic count and is never checked for expiry. We use a
+      # large fixed budget so tic_powers! can still decrement uniformly
+      # and the value stays > 0 for any plausible level length.
+      berserk:     10_000_000,
     }.freeze
 
     # Tic threshold under which the powerup's screen-tint pulses on
@@ -146,7 +151,8 @@ module Rubydoom
       { radsuit:         0,
         invisibility:    0,
         invulnerability: 0,
-        light_amp:       0 }
+        light_amp:       0,
+        berserk:         0 }
     end
 
     # Fresh key inventory: no colour, no variant.

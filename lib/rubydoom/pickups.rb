@@ -27,7 +27,7 @@ module Rubydoom
     # armor, keys, backpack) gets `dsitemup`. Powerups, when we have
     # them, will play `dsgetpow` — none of those types appear here yet.
     WEAPON_DOOMEDNUMS = [2001, 2002, 2003, 2004, 2005].freeze
-    POWERUP_DOOMEDNUMS = [2024, 2025].freeze
+    POWERUP_DOOMEDNUMS = [2023, 2024, 2025].freeze
 
     def initialize(map)
       @map     = map
@@ -113,6 +113,7 @@ module Rubydoom
       when 2005 then player.pickup_weapon(:chainsaw)                # chainsaw
 
       # ---- Powerups ----
+      when 2023 then pickup_berserk(player)                         # berserk pack
       when 2024 then player.grant_power(:invisibility)              # blursphere
       when 2025 then player.grant_power(:radsuit)                   # radsuit / biosuit
       else
@@ -144,7 +145,17 @@ module Rubydoom
       2007, 2048, 2008, 2049, 2046, 2047, 17, 8, # ammo + backpack
       5, 6, 13, 38, 39, 40,                     # keys (cards + skulls)
       2001, 2002, 2003, 2004, 2005,             # weapons (shotgun/chaingun/rocket/plasma/chainsaw)
-      2024, 2025,                                # powerups (blursphere, radsuit)
+      2023, 2024, 2025,                          # powerups (berserk, blursphere, radsuit)
     ].freeze
+
+    # Vanilla `P_GivePower(pw_strength)` plus the berserk pack's
+    # secondary effects: heals to 100 if below, switches to the fist
+    # so the player can feel the bonus immediately. Always absorbed.
+    def pickup_berserk(player)
+      player.grant_power(:berserk)
+      player.add_health(100) if player.health < 100
+      player.pending_weapon = :fist
+      true
+    end
   end
 end

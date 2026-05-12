@@ -115,6 +115,7 @@ module Rubydoom
       @scrollers  = WallScrollers.new(@map)
       @sector_lights  = SectorLights.new(@map, rng: @rng)
       @sector_effects = SectorEffects.new(@clipper)
+      @sector_effects.switches = @switches
       @pickups        = Pickups.new(@map)
       @pickups.sound  = @sound
       @player      = Player.from_thing(@map.player_start)
@@ -248,6 +249,8 @@ module Rubydoom
     # re-fire; WR handlers leave it intact.
     W1_LIGHT_TO_35   = 35
     W1_STAIRS_BUILD  = 8
+    W1_EXIT_NORMAL   = 52
+    W1_EXIT_SECRET   = 124
 
     def handle_walk_cross(ld)
       fired =
@@ -271,6 +274,14 @@ module Rubydoom
           true
         elsif ld.special_type == W1_LIGHT_TO_35
           @sector_lights.set_tag_light(ld.sector_tag, 35)
+          ld.special_type = 0
+          true
+        elsif ld.special_type == W1_EXIT_NORMAL
+          @switches.request_exit!
+          ld.special_type = 0
+          true
+        elsif ld.special_type == W1_EXIT_SECRET
+          @switches.request_exit!(secret: true)
           ld.special_type = 0
           true
         else

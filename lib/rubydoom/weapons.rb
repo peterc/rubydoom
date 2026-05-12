@@ -296,9 +296,13 @@ module Rubydoom
       5 * (1 + @rng.rand(3))
     end
 
-    # 2 * (1 + rand(10)) = 2..20. Vanilla A_Punch / A_Saw.
-    def melee_damage
-      2 * (1 + @rng.rand(10))
+    # 2 * (1 + rand(10)) = 2..20. Vanilla A_Punch / A_Saw. With the
+    # berserk powerup the fist (only) hits 10× harder, matching
+    # vanilla `damage *= 10` in A_Punch. A_Saw is unaffected — the
+    # chainsaw never gets the bonus.
+    def melee_damage(player = nil, berserk_bonus: false)
+      base = 2 * (1 + @rng.rand(10))
+      berserk_bonus && player&.has_power?(:berserk) ? base * 10 : base
     end
 
     def shoot(player, damage, range: Hitscan::DEFAULT_RANGE, spread_deg: 0.0)
@@ -352,7 +356,7 @@ module Rubydoom
     end
 
     def punch(player)
-      shoot(player, melee_damage, range: 64.0)
+      shoot(player, melee_damage(player, berserk_bonus: true), range: 64.0)
     end
 
     def saw(player)
