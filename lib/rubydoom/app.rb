@@ -235,6 +235,7 @@ module Rubydoom
       input = consume_input
       return unless input  # demo ended (handled inside consume_input)
       @game.tick(input)
+      rebuild_renderer if @game.map_reloaded
       announce_exit_if_pending
     end
 
@@ -369,6 +370,15 @@ module Rubydoom
     end
 
     private
+
+    def rebuild_renderer
+      sky = Sky.for_map(@game.map.name, @game.textures)
+      @renderer3d = Renderer3D.new(@game.map, @game.bsp,
+                                   textures: @game.textures, flats: @game.flats,
+                                   palette: @game.palette, colormap: @game.colormap,
+                                   sky: sky, sprites: @game.sprites)
+      @automap = Automap.new(@game.map, bsp: @game.bsp)
+    end
 
     # On exit-switch fire, jump to the next map. Normal exits walk
     # forward in the WAD directory (`doom1.wad` happens to store the

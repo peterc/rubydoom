@@ -53,6 +53,7 @@ module Rubydoom
     attr_reader :wad, :palette, :colormap, :graphics,
                 :textures, :sprites, :flats,
                 :map, :bsp, :clipper,
+                :map_reloaded,
                 :doors, :plats, :floors, :donuts, :stairs, :teleports,
                 :switches, :scrollers,
                 :sector_lights, :sector_effects, :pickups,
@@ -101,6 +102,7 @@ module Rubydoom
     # pre-built Rubydoom::Map — useful for `Scenario`-style synthetic
     # arenas where you build the geometry in Ruby and skip the WAD.
     def load_map(arg, pistol_start: false)
+      @map_reloaded  = true
       carried_player = pistol_start ? nil : @player
       @map        = arg.is_a?(Map) ? arg : Map.load(@wad, arg, skill: @skill)
       @bsp        = Bsp.new(@map.nodes)
@@ -178,6 +180,7 @@ module Rubydoom
     #   8. HUD.
     #   9. Discrete edges (use / respawn / weapon-switch / debug).
     def tick(input)
+      @map_reloaded = false
       apply_look(input)
       if @player.dead?
         update_dead_view_height
