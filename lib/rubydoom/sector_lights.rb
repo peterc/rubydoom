@@ -10,27 +10,36 @@ module Rubydoom
   #   * type 8  — glow. Light_level oscillates smoothly between
   #               max and min at GLOW_SPEED per tic, reversing at
   #               each extreme.
-  #   * type 12 — synchronized slow strobe. Bright/dark pulse with
-  #               vanilla STROBEBRIGHT / SLOWDARK times. All type-12
-  #               sectors start with the same phase, so they pulse
-  #               in lock-step (matters once a map has more than one).
+  #   * types 2 / 13 — fast strobe (STROBEBRIGHT=5, FASTDARK=15).
+  #               Type 2 starts with a random per-sector phase
+  #               (P_Random & 7 + 1); type 13 starts in lockstep so
+  #               all type-13 sectors pulse together.
+  #   * types 3 / 12 — slow strobe (STROBEBRIGHT=5, SLOWDARK=35).
+  #               Same sync/non-sync split as fast.
   #
   # Original `sector.light_level` is captured at construction as
   # "max"; we lose it if SectorLights is rebuilt mid-level (it isn't
   # in our flow — a fresh SectorLights only appears on map load).
   class SectorLights
-    FLASH        = 1
-    GLOW         = 8
-    STROBE_SYNC  = 12
+    FLASH            = 1
+    STROBE_FAST      = 2     # FASTDARK, non-sync
+    STROBE_SLOW      = 3     # SLOWDARK, non-sync
+    GLOW             = 8
+    STROBE_SLOW_SYNC = 12    # SLOWDARK, sync
+    STROBE_FAST_SYNC = 13    # FASTDARK, sync
 
     STROBE_BRIGHT_TICS = 5
+    STROBE_FAST_DARK   = 15
     STROBE_SLOW_DARK   = 35
     GLOW_SPEED         = 8
     FLASH_BRIGHT_MASK  = 64   # bright dwell = (rand & 64) + 1, i.e. 1..65 tics
     FLASH_DARK_MASK    = 7    # dark dwell   = (rand & 7)  + 1, i.e. 1..8 tics
+    STROBE_PHASE_MASK  = 7    # non-sync initial dwell = (rand & 7) + 1
 
-    # Per-sector light-state record. `kind` picks the tic transition.
-    Light = Struct.new(:sector, :kind, :max, :min, :state, :count)
+    # Per-sector light-state record. `kind` picks the tic transition;
+    # `dark_tics` carries the strobe's dark duration so fast and slow
+    # variants can share `step_strobe`.
+    Light = Struct.new(:sector, :kind, :max, :min, :state, :count, :dark_tics)
 
     def initialize(map, rng: Random.new)
       @map     = map
@@ -52,16 +61,28 @@ module Rubydoom
         when FLASH
           mn = min_neighbor_light(s)
           @lights << Light.new(s, :flash, s.light_level, mn, :bright,
-                               (@rng.rand(256) & FLASH_BRIGHT_MASK) + 1)
+                               (@rng.rand(256) & FLASH_BRIGHT_MASK) + 1, nil)
         when GLOW
           mn = min_neighbor_light(s)
-          @lights << Light.new(s, :glow, s.light_level, mn, :down, 0)
-        when STROBE_SYNC
-          mn = min_neighbor_light(s)
-          mn = 0 if mn == s.light_level  # mirrors vanilla "if equal, force 0"
-          @lights << Light.new(s, :strobe, s.light_level, mn, :bright, 1)
+          @lights << Light.new(s, :glow, s.light_level, mn, :down, 0, nil)
+        when STROBE_FAST
+          add_strobe(s, STROBE_FAST_DARK, sync: false)
+        when STROBE_SLOW
+          add_strobe(s, STROBE_SLOW_DARK, sync: false)
+        when STROBE_FAST_SYNC
+          add_strobe(s, STROBE_FAST_DARK, sync: true)
+        when STROBE_SLOW_SYNC
+          add_strobe(s, STROBE_SLOW_DARK, sync: true)
         end
       end
+    end
+
+    def add_strobe(sector, dark_tics, sync:)
+      mn = min_neighbor_light(sector)
+      mn = 0 if mn == sector.light_level  # vanilla "if equal, force 0"
+      count = sync ? 1 : (@rng.rand(256) & STROBE_PHASE_MASK) + 1
+      @lights << Light.new(sector, :strobe, sector.light_level, mn,
+                           :bright, count, dark_tics)
     end
 
     def step(l)
@@ -108,7 +129,7 @@ module Rubydoom
       if l.state == :bright
         l.sector.light_level = l.min
         l.state = :dark
-        l.count = STROBE_SLOW_DARK
+        l.count = l.dark_tics
       else
         l.sector.light_level = l.max
         l.state = :bright
