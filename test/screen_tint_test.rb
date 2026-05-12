@@ -111,14 +111,6 @@ class ScreenTintTest < Minitest::Test
     assert_equal 6, pp.bonus_count
   end
 
-  def test_reset_to_start_clears_tints
-    @player.take_damage(50)
-    @player.flash_bonus!
-    @player.reset_to_start!(Struct.new(:x, :y, :angle).new(0, 0, 0))
-    assert_equal 0, @player.damage_count
-    assert_equal 0, @player.bonus_count
-  end
-
   def test_tic_screen_tints_is_called_each_game_tic
     game = fresh_game
     game.player.take_damage(10)

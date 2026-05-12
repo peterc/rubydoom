@@ -92,8 +92,12 @@ module Rubydoom
     # geometry is rebuilt here. The previous player's inventory is
     # carried into the new map (vanilla single-player behavior — keys
     # reset, but weapons / ammo / backpack / armor / health all stick).
-    def load_map(map_name)
-      carried_player = @player
+    #
+    # `pistol_start: true` skips the inventory carry, giving the fresh
+    # player the vanilla pistol-start kit (100 HP, fist + pistol, 50
+    # bullets, no armor, no keys). Used by the death respawn path.
+    def load_map(map_name, pistol_start: false)
+      carried_player = pistol_start ? nil : @player
       @map        = Map.load(@wad, map_name, skill: @skill)
       @bsp        = Bsp.new(@map.nodes)
       @clipper    = Clipper.new(@map, @bsp)
@@ -197,14 +201,16 @@ module Rubydoom
       @player.tic_powers!
     end
 
-    # Respawn at the map's player_start. Single-player vanilla restarts
-    # the level on death; we keep the map state (open doors, dead
-    # monsters, etc.) and just reset the player.
+    # Death respawn. Mirrors vanilla single-player: the entire level
+    # is reloaded — monsters back, doors closed, sectors at their
+    # designer-given heights — and the player respawns pistol-start
+    # (100 HP, fist + pistol, 50 bullets, no armor, no keys). Inputs
+    # bound to `:respawn` only fire while the player is dead (see
+    # App#read_input), but we no-op if called from elsewhere with a
+    # live player so the cheat doesn't double-reset a live run.
     def respawn_player
-      @player.reset_to_start!(@map.player_start)
-      @last_player_health = @player.health
-      @last_floor_z       = @clipper.floor_at(@player.x, @player.y)
-      @delta_view_height  = 0.0
+      return unless @player.dead?
+      load_map(@map.name, pistol_start: true)
     end
 
     # Reposition the player without going through a map load — used by

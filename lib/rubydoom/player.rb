@@ -231,31 +231,6 @@ module Rubydoom
       god_mode
     end
 
-    # Reset back to pistol-start state. Used on respawn — vanilla
-    # single-player restarts the level entirely; we just bring the
-    # player back at their last known map_start with default stats
-    # and leave the map state (open doors, dead monsters) intact.
-    def reset_to_start!(start_thing)
-      self.x = start_thing.x
-      self.y = start_thing.y
-      self.angle = start_thing.angle
-      self.bob = 0.0
-      self.view_height = NOMINAL_VIEW_HEIGHT.to_f
-      self.health = DEFAULT_MAX_HEALTH
-      self.armor  = 0
-      self.armor_class = nil
-      DEFAULT_AMMO.each { |k, v| self.ammo[k] = v }
-      self.current_weapon = :pistol
-      self.pending_weapon = nil
-      DEFAULT_WEAPONS.each { |k, v| self.weapons_owned[k] = v }
-      self.keys = self.class.empty_keys
-      self.backpack = false
-      DEFAULT_MAX_AMMO.each { |k, v| self.max_ammo[k] = v }
-      self.damage_count = 0
-      self.bonus_count  = 0
-      self.powers = self.class.empty_powers
-    end
-
     # Count for the current weapon's ammo type, or nil for melee.
     def current_ammo
       type = WEAPON_AMMO[current_weapon]

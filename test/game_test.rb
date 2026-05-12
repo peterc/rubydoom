@@ -84,6 +84,48 @@ class GameTest < Minitest::Test
     refute game.player.dead?
   end
 
+  # Vanilla single-player: dying reloads the entire level (monsters back,
+  # doors closed, sectors reverted) and the player is pistol-started.
+  def test_death_respawn_reloads_map_and_pistol_starts
+    game = fresh_game
+    alive = ->(c) { c.monsters.count { |m| m.state != :dead } }
+    alive_before = alive.call(game.combat)
+    combat_instance_before = game.combat.object_id
+    doors_instance_before  = game.doors.object_id
+
+    # Build up some non-default inventory so we can prove it's wiped.
+    game.player.weapons_owned[:shotgun] = true
+    game.player.ammo[:bullet] = 200
+    game.player.add_armor(50, type: :green)
+    game.player.keys[:blue][:card] = true
+
+    # Kill a few monsters so they fall out of the alive count.
+    game.combat.monsters.first(3).each do |m|
+      game.combat.damage(m, 10_000, source: game.player)
+    end
+    50.times { game.tick(Rubydoom::Input.new(0, 0, 0, 0, false, [])) }
+    assert alive.call(game.combat) < alive_before,
+           "killed monsters drop out of the alive count"
+
+    game.player.health = 0
+    game.tick(Rubydoom::Input.new(0, 0, 0, 0, false, [:respawn]))
+
+    # Pistol-start kit.
+    assert_equal 100, game.player.health
+    assert_equal 0,   game.player.armor
+    refute game.player.has_weapon?(:shotgun), "shotgun gone on respawn"
+    assert game.player.has_weapon?(:pistol),  "pistol kept on respawn"
+    assert_equal 50,  game.player.ammo[:bullet]
+    refute game.player.has_key?(:blue),       "blue key gone on respawn"
+
+    # Map reloaded: subsystems are fresh instances and the dead
+    # monsters are alive again.
+    refute_equal combat_instance_before, game.combat.object_id
+    refute_equal doors_instance_before,  game.doors.object_id
+    assert_equal alive_before, alive.call(game.combat),
+                 "killed monsters back alive after full-level reset"
+  end
+
   private
 
   # toggle_god prints "[god mode] ON" to stdout. Swallow it so the
