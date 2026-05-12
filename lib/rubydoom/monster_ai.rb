@@ -44,6 +44,7 @@ module Rubydoom
       troo_attack:    :a_troo_attack,
       sarg_attack:    :a_sarg_attack,
       bruisr_attack:  :a_bruisr_attack,
+      head_attack:    :a_head_attack,
       boss_death:     :a_boss_death,
       pain:           :a_pain,
       scream:         :a_scream,
@@ -432,6 +433,22 @@ module Rubydoom
         return
       end
       @projectiles&.spawn_bruiser_ball(mobj, player, listener: player)
+    end
+
+    # Cacodemon: bites for (rand%6+1)*10 = 10..60 in melee range,
+    # otherwise spits an MT_HEADSHOT fireball. Vanilla A_HeadAttack
+    # has no separate sound for the bite path — the species's
+    # attack_sound (:claw, same as imp/Baron) carries it; the fireball
+    # plays dsfirsht on spawn inside Projectiles.
+    def a_head_attack(mobj, player)
+      return unless mobj.target
+      if approx_dist(mobj, player.x, player.y) <= MELEE_RANGE + 20
+        play_attack_sound(mobj, player)
+        damage = (1 + @rng.rand(6)) * 10
+        player.take_damage(damage)
+        return
+      end
+      @projectiles&.spawn_caco_ball(mobj, player, listener: player)
     end
 
     # E1M8 boss-arena gate. Runs from the terminal Baron death frame

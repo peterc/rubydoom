@@ -132,6 +132,27 @@ module Rubydoom
       sarg_die5:  s("SARG", "M", 4,  nil,    :sarg_die6),
       sarg_die6:  s("SARG", "N", nil,nil,    nil),
 
+      # --- Cacodemon (HEAD) ---
+      # Vanilla mobjinfo MT_HEAD has no melee state; missile_state →
+      # HEAD_ATK1..3 fires A_HeadAttack on the last frame, which itself
+      # decides bite-vs-missile. Run cycle is a single looping frame
+      # (cacodemon hovers, no leg animation). 6-frame death; A_Scream
+      # on DIE2, A_Fall on DIE5, terminal on DIE6.
+      head_stnd:  s("HEAD", "A", 10, :look,  :head_stnd),
+      head_run1:  s("HEAD", "A", 3,  :chase, :head_run1),
+      head_atk1:  s("HEAD", "B", 5,  :face_target, :head_atk2),
+      head_atk2:  s("HEAD", "C", 5,  :face_target, :head_atk3),
+      head_atk3:  s("HEAD", "D", 5,  :head_attack, :head_run1),
+      head_pain:  s("HEAD", "E", 3,  nil,    :head_pain2),
+      head_pain2: s("HEAD", "E", 3,  :pain,  :head_pain3),
+      head_pain3: s("HEAD", "F", 6,  nil,    :head_run1),
+      head_die1:  s("HEAD", "G", 8,  nil,    :head_die2),
+      head_die2:  s("HEAD", "H", 8,  :scream,:head_die3),
+      head_die3:  s("HEAD", "I", 8,  nil,    :head_die4),
+      head_die4:  s("HEAD", "J", 8,  nil,    :head_die5),
+      head_die5:  s("HEAD", "K", 8,  :fall,  :head_die6),
+      head_die6:  s("HEAD", "L", nil,nil,    nil),
+
       # --- Baron of Hell (BOSS) ---
       # 8 stand + 8 run + 3 attack + 2 pain + 7 death. Skips the 7
       # raise states (S_BOSS_RAISE1..7) since we don't implement

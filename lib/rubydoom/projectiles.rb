@@ -73,6 +73,22 @@ module Rubydoom
       ["BAL7", "E", 6],
     ].freeze
 
+    # Cacodemon fireball stats from MT_HEADSHOT (mobjinfo.h). Speed
+    # matches the imp's; damage rolls (rand%8 + 1) * 5 = 5..40. Sprite
+    # is BAL2 (red-purple ball) with the same A/B alternation and
+    # C/D/E death animation as MT_TROOPSHOT. Launch z is 3/4 of the
+    # caco's body height — same fraction as the other shooters.
+    HEADSHOT_SPEED       = 10.0
+    HEADSHOT_DAMAGE_D    = 8
+    HEADSHOT_DAMAGE_M    = 5
+    HEADSHOT_LAUNCH_Z_OFFSET = 42
+    HEADSHOT_FLIGHT_FRAMES = ["A", "B"].freeze
+    HEADSHOT_DEATH_FRAMES  = [
+      ["BAL2", "C", 6],
+      ["BAL2", "D", 6],
+      ["BAL2", "E", 6],
+    ].freeze
+
     # Plasma bolt stats from MT_PLASMA (mobjinfo.h).
     PLASMA_SPEED          = 25.0
     PLASMA_DAMAGE_D       = 8       # direct hit = (rand%8 + 1) * MULT = 5..40
@@ -194,6 +210,45 @@ module Rubydoom
                        :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
                        bruiser_shot_damage, :firxpl,
                        BRUISER_FLIGHT_FRAMES, BRUISER_DEATH_FRAMES, false)
+      @projs << proj
+      @map.things << thing
+      @sound&.play_at(:firsht, sx, sy, listener, source: owner_mobj)
+      proj
+    end
+
+    # Spawn a cacodemon fireball (MT_HEADSHOT). Reuses the same flight
+    # machinery as the imp / Baron projectiles — only sprite and stats
+    # differ. MF_SHADOW XY-fuzz applies when the player has invisibility.
+    def spawn_caco_ball(owner_mobj, target, listener: target)
+      sx = owner_mobj.thing.x.to_f
+      sy = owner_mobj.thing.y.to_f
+      sz = owner_z(owner_mobj) + HEADSHOT_LAUNCH_Z_OFFSET
+
+      tx = target.x.to_f
+      ty = target.y.to_f
+      tz = target_eye_z(target)
+
+      dx = tx - sx
+      dy = ty - sy
+      dist = Math.hypot(dx, dy)
+      dist = 1.0 if dist < 1.0
+      time_to_target = dist / HEADSHOT_SPEED
+
+      ang_rad = Math.atan2(dy, dx)
+      if target.respond_to?(:has_power?) && target.has_power?(:invisibility)
+        ang_rad += (@rng.rand - 0.5) * 2 * (22.5 * Math::PI / 180.0)
+      end
+      vx = HEADSHOT_SPEED * Math.cos(ang_rad)
+      vy = HEADSHOT_SPEED * Math.sin(ang_rad)
+      vz = (tz - sz) / time_to_target
+
+      angle = ang_rad * 180.0 / Math::PI
+
+      thing = Map::Thing.new(sx, sy, angle, 0, 0, false, "BAL2", "A", false, sz)
+      proj  = Proj.new(thing, owner_mobj, sz, vx, vy, vz,
+                       :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
+                       headshot_damage, :firxpl,
+                       HEADSHOT_FLIGHT_FRAMES, HEADSHOT_DEATH_FRAMES, false)
       @projs << proj
       @map.things << thing
       @sound&.play_at(:firsht, sx, sy, listener, source: owner_mobj)
@@ -496,6 +551,10 @@ module Rubydoom
 
     def bruiser_shot_damage
       (@rng.rand(BRUISER_SHOT_DAMAGE_D) + 1) * BRUISER_SHOT_DAMAGE_M
+    end
+
+    def headshot_damage
+      (@rng.rand(HEADSHOT_DAMAGE_D) + 1) * HEADSHOT_DAMAGE_M
     end
 
     def rocket_direct_damage

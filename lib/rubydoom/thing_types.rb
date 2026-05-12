@@ -32,6 +32,7 @@ module Rubydoom
       Info.new(doomednum: 3002, sprite: "SARG", frame: "A", radius: 30, solid: true),  # demon
       Info.new(doomednum:   58, sprite: "SARG", frame: "A", radius: 30, solid: true),  # spectre
       Info.new(doomednum: 3003, sprite: "BOSS", frame: "A", radius: 24, solid: true),  # baron of hell
+      Info.new(doomednum: 3005, sprite: "HEAD", frame: "A", radius: 31, solid: true),  # cacodemon
 
       # Weapons — pickups, MF_SPECIAL only.
       Info.new(doomednum: 2001, sprite: "SHOT", frame: "A", radius: 20, solid: false),  # shotgun

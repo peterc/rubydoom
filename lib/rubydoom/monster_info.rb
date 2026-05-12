@@ -101,6 +101,26 @@ module Rubydoom
         active_sound: :dmact,
         flags: FLAG_COUNTKILL,
       ),
+      # Cacodemon (HEAD) — health 400, no Doom 1 episode-1 appearance
+      # but populates E2/E3 heavily. Floats in vanilla (MF_FLOAT |
+      # MF_NOGRAVITY); we don't model z movement yet so it sits on the
+      # floor — the action logic and projectile path still work. No
+      # separate melee state: a_head_attack chooses bite-vs-fireball at
+      # runtime so melee_state stays nil and a_chase only enters the
+      # missile sequence (matching vanilla mobjinfo MT_HEAD).
+      Info.new(
+        doomednum: 3005, health: 400, radius: 31, height: 56,
+        speed: 8, pain_chance: 128, reaction_time: 8,
+        spawn_state:   :head_stnd,
+        see_state:     :head_run1,
+        pain_state:    :head_pain,
+        missile_state: :head_atk1,
+        death_state:   :head_die1,
+        see_sound:    :cacsit, pain_sound: :dmpain,
+        death_sound:  :cacdth, attack_sound: :claw,
+        active_sound: :dmact,
+        flags: FLAG_COUNTKILL,
+      ),
       # Baron of Hell (BOSS) — health 1000, E1M8 boss. Melee claw or
       # spits an MT_BRUISERSHOT fireball depending on range. Same trick
       # as the imp: melee_state == missile_state, so a_chase enters
