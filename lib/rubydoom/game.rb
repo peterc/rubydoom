@@ -52,7 +52,8 @@ module Rubydoom
     attr_reader :wad, :palette, :colormap, :graphics,
                 :textures, :sprites, :flats,
                 :map, :bsp, :clipper,
-                :doors, :plats, :floors, :donuts, :stairs, :switches, :scrollers,
+                :doors, :plats, :floors, :donuts, :stairs, :teleports,
+                :switches, :scrollers,
                 :sector_lights, :sector_effects, :pickups,
                 :noise_alert, :combat, :sight,
                 :monster_movement, :monster_ai, :projectiles,
@@ -102,6 +103,8 @@ module Rubydoom
       @floors     = Floors.new(@map)
       @donuts     = Donuts.new(@map)
       @stairs     = Stairs.new(@map)
+      @teleports  = Teleports.new(@map, @clipper)
+      @teleports.sound = @sound
       @switches   = Switches.new(@map)
       @switches.doors  = @doors
       @switches.plats  = @plats
@@ -255,6 +258,13 @@ module Rubydoom
           true
         elsif (door_result = @doors.handle_cross(ld))
           ld.special_type = 0 if door_result == :w1
+          true
+        elsif @teleports.handle_cross(ld, @player)
+          # WR teleport — leave special intact. The jump moves the
+          # player to a new floor, so reset the camera step-up
+          # smoothing or the next tic registers it as a giant step.
+          @last_floor_z      = @clipper.floor_at(@player.x, @player.y)
+          @delta_view_height = 0.0
           true
         elsif ld.special_type == W1_STAIRS_BUILD && @stairs.handle_cross(ld)
           ld.special_type = 0

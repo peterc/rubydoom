@@ -92,25 +92,35 @@ module Rubydoom
       floor + h - (h / 4)
     end
 
-    def player_eye(player)
-      floor = @clipper.floor_at(player.x, player.y) || 0
-      floor + (player.respond_to?(:view_height) ? player.view_height : 41)
+    # Eye-height z for whatever the monster is looking at. Player uses
+    # view_height; another mobj uses 3/4 of its body (vanilla rule).
+    # Falls back to the floor z for arbitrary "things" without info.
+    def player_eye(target)
+      if target.respond_to?(:view_height)
+        floor = @clipper.floor_at(target.x, target.y) || 0
+        floor + target.view_height
+      elsif target.respond_to?(:thing) && target.respond_to?(:info)
+        floor = @clipper.floor_at(target.thing.x, target.thing.y) || 0
+        floor + target.info.height - (target.info.height / 4)
+      else
+        @clipper.floor_at(target.x, target.y) || 0
+      end
     end
 
-    def can_see_player?(mobj, player)
+    def can_see_player?(mobj, target)
       sz = sight_z_for_mobj(mobj)
-      tz = player_eye(player)
-      @sight.visible?(mobj.thing.x, mobj.thing.y, sz,
-                      player.x, player.y, tz)
+      tx, ty = target_xy(target)
+      tz = player_eye(target)
+      @sight.visible?(mobj.thing.x, mobj.thing.y, sz, tx, ty, tz)
     end
 
     # Forward 180° check — only used by A_Look so a monster doesn't
-    # acquire a player who's directly behind it (vanilla's rule unless
+    # acquire a target who's directly behind it (vanilla's rule unless
     # the monster has been noise-alerted).
-    def in_front_of?(mobj, player)
-      ang_to_player = Math.atan2(player.y - mobj.thing.y,
-                                 player.x - mobj.thing.x) * 180.0 / Math::PI
-      diff = ((ang_to_player - mobj.thing.angle + 540) % 360) - 180
+    def in_front_of?(mobj, target)
+      tx, ty = target_xy(target)
+      ang_to_target = Math.atan2(ty - mobj.thing.y, tx - mobj.thing.x) * 180.0 / Math::PI
+      diff = ((ang_to_target - mobj.thing.angle + 540) % 360) - 180
       diff.abs <= 90
     end
 
@@ -184,6 +194,7 @@ module Rubydoom
         return
       end
       target = mobj.target
+      tx, ty = target_xy(target)
 
       # Decrement move_count; reroll on expiry, also reroll if last
       # walk hit a wall (handled inside try_walk by setting move_dir
@@ -193,7 +204,7 @@ module Rubydoom
 
       # Face the target for attack range checks (vanilla doesn't do
       # this here, but it stabilises the attack-rolling).
-      dist = approx_dist(mobj, target.x, target.y)
+      dist = approx_dist(mobj, tx, ty)
 
       # Vanilla P_CheckMeleeRange / P_CheckMissileRange both gate on
       # P_CheckSight to the target. Without that the monster fires
@@ -224,7 +235,7 @@ module Rubydoom
       # Try to step in our current direction.
       stepped = @movement.try_walk(mobj, player)
       if !stepped || mobj.move_count.nil? || mobj.move_count <= 0
-        @movement.new_chase_dir(mobj, target.x, target.y, player)
+        @movement.new_chase_dir(mobj, tx, ty, player)
         mobj.move_count = 15 + @rng.rand(16)  # vanilla: rand & 15
         # Try once more in the freshly-picked direction.
         @movement.try_walk(mobj, player)
@@ -250,8 +261,7 @@ module Rubydoom
     # that uses `mobj.thing.angle` (hitscan and projectile alike).
     def a_face_target(mobj, _player)
       return unless mobj.target
-      tx = mobj.target.x
-      ty = mobj.target.y
+      tx, ty = target_xy(mobj.target)
       ang = Math.atan2(ty - mobj.thing.y, tx - mobj.thing.x) * 180.0 / Math::PI
       if mobj.target.respond_to?(:has_power?) && mobj.target.has_power?(:invisibility)
         ang += (@rng.rand - 0.5) * 2 * FUZZ_DEG_MAX
@@ -343,6 +353,18 @@ module Rubydoom
         best.take_damage(damage)
       else
         @combat.damage(best, damage, source: mobj)
+      end
+    end
+
+    # Target may be a Player (exposes .x / .y directly) or another
+    # Mobj (.thing.x / .thing.y) once infighting kicks in. This
+    # collapses both into an (x, y) pair so chase / face / attack
+    # paths don't have to branch.
+    def target_xy(target)
+      if target.respond_to?(:thing) && target.respond_to?(:info)
+        [target.thing.x, target.thing.y]
+      else
+        [target.x, target.y]
       end
     end
 
