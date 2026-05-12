@@ -48,6 +48,7 @@ module Rubydoom
     DELTA_VIEW_INIT_DIV    = 8     # initial delta = (target - current) / 8
     DELTA_VIEW_ACCEL       = 0.25  # delta gains this per tic
     VIEW_HEIGHT_FLOOR_FRAC = 0.5   # don't dip below half nominal
+    OOF_FALL_THRESHOLD     = 24    # single-tic drop bigger than this plays dsoof
 
     attr_reader :wad, :palette, :colormap, :graphics,
                 :textures, :sprites, :flats,
@@ -187,6 +188,7 @@ module Rubydoom
       @scrollers.update_tic
       @sector_lights.update_tic
       @sector_effects.update_tic(@player)
+      @switches.update_tic
       @pickups.update_tic(@player) unless @player.dead?
       @weapons.fire_button = input.fire
       @weapons.update_tic(@player)
@@ -397,6 +399,12 @@ module Rubydoom
       if step != 0
         @player.view_height -= step
         @delta_view_height   = (nominal - @player.view_height) / DELTA_VIEW_INIT_DIV
+        # Vanilla plays dsoof when the player's downward velocity at
+        # impact exceeds GRAVITY*8 (~24 units/tic). Without z physics
+        # we approximate by treating any single-tic drop bigger than
+        # MAXSTEPMOVE as a fall. A descending lift moves at 2 u/tic so
+        # it doesn't trigger.
+        @sound&.play(:oof, source: @player) if step <= -OOF_FALL_THRESHOLD
       end
 
       prev = @player.view_height

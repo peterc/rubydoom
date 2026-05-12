@@ -16,6 +16,9 @@ module Rubydoom
   #               all type-13 sectors pulse together.
   #   * types 3 / 12 — slow strobe (STROBEBRIGHT=5, SLOWDARK=35).
   #               Same sync/non-sync split as fast.
+  #   * type 17 — fire flicker. Every 4 tics light_level becomes
+  #               max − (rand & 3)*16, clamped at min. Captures min
+  #               at min_neighbor + 16, vanilla quirk.
   #
   # Original `sector.light_level` is captured at construction as
   # "max"; we lose it if SectorLights is rebuilt mid-level (it isn't
@@ -27,6 +30,7 @@ module Rubydoom
     GLOW             = 8
     STROBE_SLOW_SYNC = 12    # SLOWDARK, sync
     STROBE_FAST_SYNC = 13    # FASTDARK, sync
+    FIRE_FLICKER     = 17
 
     STROBE_BRIGHT_TICS = 5
     STROBE_FAST_DARK   = 15
@@ -35,6 +39,10 @@ module Rubydoom
     FLASH_BRIGHT_MASK  = 64   # bright dwell = (rand & 64) + 1, i.e. 1..65 tics
     FLASH_DARK_MASK    = 7    # dark dwell   = (rand & 7)  + 1, i.e. 1..8 tics
     STROBE_PHASE_MASK  = 7    # non-sync initial dwell = (rand & 7) + 1
+    FIRE_PERIOD_TICS   = 4
+    FIRE_AMOUNT_MASK   = 3    # rand & 3 → step in {0, 16, 32, 48}
+    FIRE_STEP          = 16
+    FIRE_MIN_BOOST     = 16
 
     # Per-sector light-state record. `kind` picks the tic transition;
     # `dark_tics` carries the strobe's dark duration so fast and slow
@@ -89,6 +97,10 @@ module Rubydoom
           add_strobe(s, STROBE_FAST_DARK, sync: true)
         when STROBE_SLOW_SYNC
           add_strobe(s, STROBE_SLOW_DARK, sync: true)
+        when FIRE_FLICKER
+          mn = min_neighbor_light(s) + FIRE_MIN_BOOST
+          @lights << Light.new(s, :fire, s.light_level, mn, nil,
+                               FIRE_PERIOD_TICS, nil)
         end
       end
     end
@@ -106,7 +118,17 @@ module Rubydoom
       when :flash  then step_flash(l)
       when :glow   then step_glow(l)
       when :strobe then step_strobe(l)
+      when :fire   then step_fire(l)
       end
+    end
+
+    def step_fire(l)
+      l.count -= 1
+      return if l.count > 0
+      amount = (@rng.rand(256) & FIRE_AMOUNT_MASK) * FIRE_STEP
+      target = l.max - amount
+      l.sector.light_level = target < l.min ? l.min : target
+      l.count = FIRE_PERIOD_TICS
     end
 
     def step_flash(l)

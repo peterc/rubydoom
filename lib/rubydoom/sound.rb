@@ -48,15 +48,19 @@ module Rubydoom
     end
 
     # Spatial play — distance from `(source_x, source_y)` to `listener`
-    # determines volume. Cuts off entirely beyond CLIPPING_DIST.
-    # `source:` enforces the per-source channel rule.
+    # determines volume, and the listener-relative bearing determines
+    # pan. Cuts off entirely beyond CLIPPING_DIST. `source:` enforces
+    # the per-source channel rule.
     def play_at(name, source_x, source_y, listener, source: nil)
       sample = sample_for(name)
       return unless sample
-      dist = Math.hypot(source_x - listener.x, source_y - listener.y)
+      dx   = source_x - listener.x
+      dy   = source_y - listener.y
+      dist = Math.hypot(dx, dy)
       vol  = volume_for(dist)
       return if vol <= 0.0
-      start_on_channel(source, sample, vol)
+      pan = pan_for(dx, dy, dist, listener.angle)
+      start_on_channel(source, sample, vol, pan)
     end
 
     private
@@ -64,15 +68,27 @@ module Rubydoom
     # Cut off the previous sample on this source's channel and start
     # a new one. With `source: nil` the channel is bypassed — useful
     # for one-off sounds (pickups, switch clicks) where stacking is
-    # fine and the receiver is the player anyway.
-    def start_on_channel(source, sample, volume)
+    # fine and the receiver is the player anyway. `pan` is 0 for
+    # non-spatial plays.
+    def start_on_channel(source, sample, volume, pan = 0.0)
       if source
         prev = @channels[source]
         prev.stop if prev && prev.playing?
-        @channels[source] = sample.play(volume)
+        @channels[source] = sample.play_pan(pan, volume)
       else
-        sample.play(volume)
+        sample.play_pan(pan, volume)
       end
+    end
+
+    # Project the source-to-listener vector onto the listener's right
+    # axis. DOOM angle convention: 0° = +x, ccw. The listener's right
+    # axis is `(sin α, -cos α)`, so right = dx·sin α − dy·cos α, and
+    # dividing by distance gives a [-1, +1] pan value Gosu's
+    # play_pan accepts directly.
+    def pan_for(dx, dy, dist, listener_angle_deg)
+      return 0.0 if dist < 1.0
+      rad = listener_angle_deg * Math::PI / 180.0
+      (dx * Math.sin(rad) - dy * Math.cos(rad)) / dist
     end
 
     def volume_for(dist)

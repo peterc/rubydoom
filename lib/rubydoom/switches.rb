@@ -41,6 +41,11 @@ module Rubydoom
     S1_DONUT             = 9
     GR_DOOR_OPEN_STAY    = 46
 
+    # Vanilla BUTTONTIME: the depressed (SW2) texture of a repeatable
+    # switch springs back to SW1 after one second. Once-only switches
+    # stay depressed forever.
+    BUTTON_REVERT_TICS = 35
+
     # Once-only switches (S1*) get their special_type cleared after
     # firing so they can't be re-used. Repeatable switches (SR*/GR*)
     # leave the special intact; we still swap the texture so the
@@ -69,6 +74,24 @@ module Rubydoom
       @donuts = nil
       @sound  = nil
       @listener = nil
+      @pending_reverts = {}
+    end
+
+    # Tick BUTTON_REVERT_TICS for every pressed repeatable switch.
+    # When the timer expires, swap the texture back to SW1 and play
+    # the click again. Hash keyed by linedef object_id so a re-press
+    # of the same switch just resets the timer instead of stacking
+    # entries (otherwise a second press would unswap immediately as
+    # the older entry fires).
+    def update_tic
+      return if @pending_reverts.empty?
+      @pending_reverts.each_value { |entry| entry[1] -= 1 }
+      @pending_reverts.reject! do |_, (ld, t)|
+        next false if t > 0
+        swap_switch_texture(ld)
+        play_switch_sound(ld, :swtchn)
+        true
+      end
     end
 
     # Late-bound to avoid initialization-order dependencies in Game#load_map.
@@ -108,7 +131,11 @@ module Rubydoom
           exit_switch = [S1_EXIT_LEVEL, S1_EXIT_SECRET].include?(ld.special_type)
           play_switch_sound(ld, exit_switch ? :swtchx : :swtchn)
           swap_switch_texture(ld)
-          ld.special_type = 0 if ONCE_ONLY.include?(ld.special_type)
+          if ONCE_ONLY.include?(ld.special_type)
+            ld.special_type = 0
+          else
+            queue_revert(ld)
+          end
           return true
         end
         return false if !ld.two_sided? || ld.impassable?
@@ -129,11 +156,19 @@ module Rubydoom
       return false unless fired
       play_switch_sound(ld, :swtchn)
       swap_switch_texture(ld)
-      ld.special_type = 0 if ONCE_ONLY.include?(ld.special_type)
+      if ONCE_ONLY.include?(ld.special_type)
+        ld.special_type = 0
+      else
+        queue_revert(ld)
+      end
       true
     end
 
     private
+
+    def queue_revert(ld)
+      @pending_reverts[ld.object_id] = [ld, BUTTON_REVERT_TICS]
+    end
 
     # Play the switch click at the linedef's midpoint so the volume
     # attenuates from the actual switch, not the player.

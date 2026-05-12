@@ -245,6 +245,20 @@ module Rubydoom
       if mobj.move_dir != MonsterMovement::DI_NODIR
         mobj.thing.angle = mobj.move_dir * 45.0
       end
+
+      # Idle wandering grunts (posact / bgact / dmact). Vanilla rolls
+      # P_Random() < 3 once per A_Chase tic, i.e. 3-in-256 ≈ 1.2% per
+      # tic — roughly one grunt every ~6 seconds per monster.
+      play_active_sound(mobj, player) if @rng.rand(256) < ACTIVE_SOUND_CHANCE
+    end
+
+    ACTIVE_SOUND_CHANCE = 3
+
+    def play_active_sound(mobj, listener)
+      return unless @sound && mobj.info.active_sound
+      @sound.play_at(mobj.info.active_sound,
+                     mobj.thing.x, mobj.thing.y, listener,
+                     source: mobj)
     end
 
     # ---------- A_FaceTarget ----------
