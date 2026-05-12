@@ -133,10 +133,16 @@ module Rubydoom
       return if mobj.reaction_time && mobj.reaction_time > 0
       return unless player.health > 0
 
-      noise_target = @noise_alert&.target_for(sector_index_for(mobj))
-      if noise_target
-        wake!(mobj, noise_target, player)
-        return
+      # Vanilla MF_AMBUSH ("deaf"): the noise-alert flood doesn't
+      # wake this monster. They still wake on sight — fall through
+      # to the in-front + line-of-sight check below.
+      deaf = (mobj.thing.flags & Map::THING_FLAG_AMBUSH) != 0
+      unless deaf
+        noise_target = @noise_alert&.target_for(sector_index_for(mobj))
+        if noise_target
+          wake!(mobj, noise_target, player)
+          return
+        end
       end
 
       return unless in_front_of?(mobj, player)
@@ -281,11 +287,12 @@ module Rubydoom
       (1 + @rng.rand(5)) * POS_DAMAGE_MULT
     end
 
-    # Cast a hitscan from the monster forward. We use the same Hitscan
-    # ray helper the player weapons go through, but we override the
-    # source angle with the monster's angle plus our spread. When the
-    # ray hits the player AABB we apply damage; otherwise it's a wall
-    # spark (cosmetic only).
+    # Cast a hitscan from the monster forward. Scans the ray for the
+    # nearest target — the player, or any other live mobj — within
+    # the spread cone. A monster shot that lands on another monster
+    # routes through Combat#damage with `source: mobj`, which fires
+    # the retarget-on-damage (infighting) logic so the victim turns
+    # on its attacker.
     def fire_bullet(mobj, player, spread_deg:, damage:)
       sx = mobj.thing.x
       sy = mobj.thing.y
@@ -293,23 +300,61 @@ module Rubydoom
       rad = ang * Math::PI / 180.0
       dx  = Math.cos(rad)
       dy  = Math.sin(rad)
-      # See if the ray reaches the player before any blocking wall.
-      pr   = Clipper::PLAYER_RADIUS
-      tx   = player.x - sx
-      ty   = player.y - sy
-      proj = tx * dx + ty * dy
-      return if proj < 0
-      perp_sq = tx * tx + ty * ty - proj * proj
-      return if perp_sq > pr * pr
-      hit_t = proj - Math.sqrt(pr * pr - perp_sq)
 
-      # Wall blocking check — fire a sight ray from monster eye to
-      # player position; if blocked we don't damage.
+      best_t = nil
+      best   = nil
+
+      # Player as a candidate.
+      pr = Clipper::PLAYER_RADIUS
+      t_pl = ray_circle_t(sx, sy, dx, dy, player.x, player.y, pr)
+      if t_pl
+        best_t = t_pl
+        best   = player
+      end
+
+      # Other live mobjs — skip the shooter; monsters and barrels
+      # alike are valid bullet targets.
+      @combat.shootables.each do |thing, mr, _mh|
+        other = @combat.mobj_for(thing)
+        next if other.nil? || other == mobj
+        t = ray_circle_t(sx, sy, dx, dy, thing.x, thing.y, mr)
+        next unless t
+        next if best_t && t >= best_t
+        best_t = t
+        best   = other
+      end
+
+      return unless best
+
+      # Wall blocking check via sight ray from monster eye to target
+      # body centre.
       sz = sight_z_for_mobj(mobj)
-      pz = player_eye(player)
-      return unless @sight.visible?(sx, sy, sz, player.x, player.y, pz)
-      _ = hit_t  # unused; we already know the ray hits the player's circle
-      player.take_damage(damage)
+      if best.respond_to?(:view_height)
+        tx = best.x; ty = best.y; tz = player_eye(best)
+      else
+        tx = best.thing.x; ty = best.thing.y
+        floor = @clipper.floor_at(tx, ty) || 0
+        h = best.info ? best.info.height : Combat::BARREL_HEIGHT
+        tz = floor + h / 2.0
+      end
+      return unless @sight.visible?(sx, sy, sz, tx, ty, tz)
+
+      if best.respond_to?(:take_damage) && !best.respond_to?(:info)
+        best.take_damage(damage)
+      else
+        @combat.damage(best, damage, source: mobj)
+      end
+    end
+
+    def ray_circle_t(px, py, dx, dy, cx, cy, r)
+      tx = cx - px
+      ty = cy - py
+      proj = tx * dx + ty * dy
+      return nil if proj < 0
+      perp_sq = tx * tx + ty * ty - proj * proj
+      r_sq = r * r
+      return nil if perp_sq > r_sq
+      proj - Math.sqrt(r_sq - perp_sq)
     end
 
     # ---------- A_TroopAttack / A_SargAttack ----------

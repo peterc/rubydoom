@@ -18,8 +18,14 @@ module Rubydoom
     TIC_RATE = 35
     TIC_DT   = 1.0 / TIC_RATE
 
-    # Map units per tic. DOOM run = 50 mu/tic, walk = 25 mu/tic; we sit
-    # well below that since collision and AI aren't pressing us yet.
+    # Map units per tic. We use a direct (no-momentum, no-friction)
+    # movement model — applying the player's input as an instantaneous
+    # velocity rather than vanilla's accel-and-friction integration.
+    # Vanilla's run forwardmove (0x32 = 50) is a thrust value, not a
+    # velocity; after FRICTION = 0xE800 ≈ 0.90625 the terminal run
+    # speed works out to about 16.7 mu/tic. Our 6.86 mu/tic sits
+    # below vanilla terminal on purpose — the direct response feels
+    # less floaty, even though the magnitude is lower.
     MOVE_SPEED_TIC    = 240.0 / TIC_RATE
     # Degrees of yaw per pixel of mouse movement.
     MOUSE_SENSITIVITY = 0.25

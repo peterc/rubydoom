@@ -274,7 +274,7 @@ module Rubydoom
       # immediately detonating against the imp that fired it.
       hit = hit_thing(proj, player)
       if hit
-        damage_target(hit, proj.damage)
+        damage_target(hit, proj.damage, source: proj.owner)
         explode(proj, player)
         return
       end
@@ -424,13 +424,14 @@ module Rubydoom
       dx * dx + dy * dy <= reach * reach
     end
 
-    def damage_target(target, amount)
+    def damage_target(target, amount, source: nil)
       if target.respond_to?(:take_damage) && !target.respond_to?(:info)
         # Player path — Player#take_damage.
         target.take_damage(amount)
       else
-        # Monster mobj path — go through Combat so pain / death works.
-        @combat.damage(target, amount)
+        # Monster mobj path — go through Combat so pain / death and
+        # the retarget-on-damage (infighting) rules fire correctly.
+        @combat.damage(target, amount, source: source)
       end
     end
 

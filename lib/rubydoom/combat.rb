@@ -123,15 +123,31 @@ module Rubydoom
       end
       return unless mobj.kind == :monster
 
-      # Targets the source if the source is a player (vanilla also
-      # supports monster-vs-monster infighting; we don't yet).
-      mobj.target = source if source.respond_to?(:x) && source.respond_to?(:y)
+      # Retarget the attacker so the victim turns to fight. Vanilla
+      # rule: skip retarget when source and target are the same
+      # species (two imps don't infight). A player source always
+      # retargets; a monster source retargets only when its info
+      # struct differs from the victim's.
+      mobj.target = source if retarget_on_damage?(mobj, source)
 
       # Roll pain — pain_chance is out of 256. We bail out if the mobj
       # is already in the pain sequence (vanilla's MF_JUSTHIT logic).
       if @rng.rand(256) < mobj.info.pain_chance && mobj.info.pain_state
         enter_state(mobj, mobj.info.pain_state)
       end
+    end
+
+    # True iff `target` should switch its target field to `source`
+    # after taking damage. Player sources always count; monster sources
+    # only count when they're a different species.
+    def retarget_on_damage?(target, source)
+      return false if source.nil? || source == target
+      # Player exposes position via .x/.y directly; mobjs go through
+      # .thing.x. Use that as a fast type discriminator.
+      return true if source.respond_to?(:x) && source.respond_to?(:y) &&
+                     !source.respond_to?(:info)
+      return false unless source.respond_to?(:info) && source.info
+      source.info != target.info
     end
 
     def update_tic(player)
