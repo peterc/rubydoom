@@ -196,14 +196,24 @@ module Rubydoom
         end
       end
 
-      # Wall blocker check — same line-of-sight ray Sight uses.
-      unless @sight.visible?(ox, oy, oz, nx, ny, nz)
-        # Stop at midpoint (good-enough approximation; we don't compute
-        # the exact intersection along the segment).
-        mx = (ox + nx) * 0.5
-        my = (oy + ny) * 0.5
-        mz = (oz + nz) * 0.5
-        land_at(proj, mx, my, mz, player)
+      # Wall blocker check. Vanilla P_LineOpening for a missile tests
+      # the destination z (not an interpolated ray z), so a rocket
+      # rising fast enough to clear a step-up at the destination point
+      # passes — even if the segment from (ox, oy, oz) would graze the
+      # step face mid-flight. Using @sight.visible? here (built for AI
+      # eye-to-target line-of-sight) is too strict and explodes the
+      # rocket against the front face of any ledge between launcher
+      # and target.
+      block_t, _block_ld = find_blocking_line(ox, oy, nx, ny, nz)
+      if block_t
+        # Park the rocket a touch short of the impact line so the
+        # explosion sprite renders in front of the wall instead of
+        # straddling it. 0.95 ≈ 1 mu pull-back at rocket speed.
+        t = block_t * 0.95
+        bx = ox + (nx - ox) * t
+        by = oy + (ny - oy) * t
+        bz = oz + (nz - oz) * t
+        land_at(proj, bx, by, bz, player)
         return
       end
 
@@ -223,6 +233,49 @@ module Rubydoom
       end
 
       advance_flight_anim(proj)
+    end
+
+    # Find the closest two-sided opening or one-sided wall on the
+    # path (ox, oy)→(nx, ny) that the missile can't clear at z = nz.
+    # Returns [t, linedef] with t ∈ (0, 1) or [nil, nil] if the path
+    # is clear. Mirrors vanilla's missile P_LineOpening rule.
+    def find_blocking_line(ox, oy, nx, ny, nz)
+      best_t = nil
+      best_ld = nil
+      @clipper.each_linedef_in_path(ox, oy, nx, ny) do |ld|
+        t = segment_t(ox, oy, nx, ny, ld)
+        next if t.nil? || t <= 0 || t >= 1
+        next if best_t && t >= best_t
+        next unless blocks_missile?(ld, nz)
+        best_t  = t
+        best_ld = ld
+      end
+      [best_t, best_ld]
+    end
+
+    def segment_t(sx, sy, tx, ty, ld)
+      v1 = @map.vertexes[ld.start_vertex_index]
+      v2 = @map.vertexes[ld.end_vertex_index]
+      sdx = v2.x - v1.x
+      sdy = v2.y - v1.y
+      dx  = tx - sx
+      dy  = ty - sy
+      denom = dx * sdy - dy * sdx
+      return nil if denom.abs < 1e-9
+      t = ((v1.x - sx) * sdy - (v1.y - sy) * sdx) / denom
+      s = ((v1.x - sx) * dy  - (v1.y - sy) * dx)  / denom
+      return nil if s < 0 || s > 1
+      t
+    end
+
+    def blocks_missile?(ld, z)
+      return true unless ld.two_sided?
+      front = @map.linedef_front_sector(ld)
+      back  = @map.linedef_back_sector(ld)
+      return true if front.nil? || back.nil?
+      opening_top = front.ceiling_height < back.ceiling_height ? front.ceiling_height : back.ceiling_height
+      opening_bot = front.floor_height   > back.floor_height   ? front.floor_height   : back.floor_height
+      z <= opening_bot || z >= opening_top
     end
 
     def step_exploding(proj)
@@ -281,10 +334,10 @@ module Rubydoom
       end
     end
 
-    # Test the projectile's AABB against the player and every live
-    # monster (skipping the owner). Returns the hit target or nil. We
-    # approximate the projectile as a small circle in XY and check
-    # vertical overlap separately.
+    # Test the projectile against the player and every live shootable
+    # (monsters AND barrels), skipping the owner. Returns the hit
+    # target or nil. The projectile is approximated as a small circle
+    # in XY with a vertical body-overlap test for z.
     def hit_thing(proj, player)
       r = IMP_FIREBALL_RADIUS
 
@@ -301,16 +354,18 @@ module Rubydoom
         end
       end
 
-      # Monsters — skip owner and only hit live ones.
-      @combat.monsters.each do |m|
-        next if m == proj.owner
-        next unless m.state == :alive
-        mr = m.info.radius.to_f
+      # All live shootables — monsters and barrels — skip owner.
+      # `shootables` yields [thing, radius, height]; we resolve back
+      # to the mobj via `mobj_for` so damage_target can route to the
+      # right path (Combat#damage handles barrel chain-explosions).
+      @combat.shootables.each do |thing, mr, mh|
+        mobj = @combat.mobj_for(thing)
+        next if mobj.nil? || mobj == proj.owner
         next unless circle_overlap?(proj.thing.x, proj.thing.y, r,
-                                    m.thing.x, m.thing.y, mr)
-        mfloor = @clipper.floor_at(m.thing.x, m.thing.y) || 0
-        next unless proj.z >= mfloor && proj.z <= mfloor + m.info.height
-        return m
+                                    thing.x, thing.y, mr)
+        mfloor = @clipper.floor_at(thing.x, thing.y) || 0
+        next unless proj.z >= mfloor && proj.z <= mfloor + mh
+        return mobj
       end
       nil
     end

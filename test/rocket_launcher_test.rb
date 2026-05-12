@@ -47,4 +47,51 @@ class RocketLauncherTest < Minitest::Test
     assert barrel_mobj.health < barrel_hp_start,
            "barrel took splash damage from rocket detonation"
   end
+
+  # Regression: a rocket fired at an imp on a ledge whose floor is
+  # well above the player's eye used to explode against the front
+  # face of the step (the AI line-of-sight check is too strict for
+  # missiles) — splash would kill the imp, but the rocket itself
+  # stayed low. With the missile-specific opening check it clears
+  # the step and detonates inside the imp's body.
+  def test_rocket_clears_step_up_when_aimed_at_high_target
+    @player.x = 3000.0
+    @player.y = -3472.0
+    @player.angle = 0.0
+    @player.view_height = 41.0
+    slope = @game.hitscan.aim_slope(@player, shootables: @game.combat.shootables)
+    assert slope > 0.1, "imp on ledge produces an upward slope"
+
+    @game.projectiles.spawn_rocket(@player, slope: slope)
+    proj = @game.projectiles.projs.last
+    50.times do
+      break if proj.state != :flying
+      @game.projectiles.update_tic(@player)
+    end
+    assert proj.z > 90, "rocket reached the imp's body z (got #{proj.z.round})"
+  end
+
+  # Regression: a rocket flying through a barrel used to pass straight
+  # through (hit_thing only iterated monsters, skipped barrels). Now
+  # rockets detonate against barrels via the shootables list.
+  def test_rocket_detonates_on_barrel
+    game = fresh_game(map: "E1M3")
+    barrel = game.combat.instance_variable_get(:@mobjs).find { |m| m.kind == :barrel }
+    skip "no barrels on E1M3" unless barrel
+
+    player = game.player
+    player.x = barrel.thing.x.to_f + 100
+    player.y = barrel.thing.y.to_f
+    player.angle = 180.0
+    slope = game.hitscan.aim_slope(player, shootables: game.combat.shootables)
+    game.projectiles.spawn_rocket(player, slope: slope)
+    proj = game.projectiles.projs.last
+
+    30.times do
+      break if proj.state != :flying
+      game.projectiles.update_tic(player)
+    end
+    assert_equal :exploding, proj.state, "rocket detonated"
+    refute_equal :alive, barrel.state, "barrel was destroyed by direct hit + splash"
+  end
 end
