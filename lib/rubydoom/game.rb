@@ -97,9 +97,12 @@ module Rubydoom
     # `pistol_start: true` skips the inventory carry, giving the fresh
     # player the vanilla pistol-start kit (100 HP, fist + pistol, 50
     # bullets, no armor, no keys). Used by the death respawn path.
-    def load_map(map_name, pistol_start: false)
+    # `arg` is either a map name (looked up in @wad via Map.load) or a
+    # pre-built Rubydoom::Map — useful for `Scenario`-style synthetic
+    # arenas where you build the geometry in Ruby and skip the WAD.
+    def load_map(arg, pistol_start: false)
       carried_player = pistol_start ? nil : @player
-      @map        = Map.load(@wad, map_name, skill: @skill)
+      @map        = arg.is_a?(Map) ? arg : Map.load(@wad, arg, skill: @skill)
       @bsp        = Bsp.new(@map.nodes)
       @clipper    = Clipper.new(@map, @bsp)
       @clipper.on_cross = method(:handle_walk_cross)
@@ -261,7 +264,7 @@ module Rubydoom
     W1_EXIT_NORMAL   = 52
     W1_EXIT_SECRET   = 124
 
-    def handle_walk_cross(ld)
+    def handle_walk_cross(ld, side = 0)
       fired =
         if @plats.handle_cross(ld)
           true  # WR — leave special intact.
@@ -271,7 +274,7 @@ module Rubydoom
         elsif (door_result = @doors.handle_cross(ld))
           ld.special_type = 0 if door_result == :w1
           true
-        elsif @teleports.handle_cross(ld, @player)
+        elsif @teleports.handle_cross(ld, @player, side)
           # WR teleport — leave special intact. The jump moves the
           # player to a new floor, so reset the camera step-up
           # smoothing or the next tic registers it as a giant step.
@@ -371,7 +374,8 @@ module Rubydoom
 
       target_x = @player.x + (forward_x * input.walk_axis + right_x * input.strafe_axis) * MOVE_SPEED_TIC
       target_y = @player.y + (forward_y * input.walk_axis + right_y * input.strafe_axis) * MOVE_SPEED_TIC
-      @player.x, @player.y = @clipper.slide(@player.x, @player.y, target_x, target_y)
+      result = @clipper.slide(@player.x, @player.y, target_x, target_y)
+      @player.x, @player.y = result if result
     end
 
     # View-height descent while dead. Vanilla drops `viewheight` by

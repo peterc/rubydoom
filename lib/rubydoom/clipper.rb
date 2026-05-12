@@ -27,18 +27,24 @@ module Rubydoom
     BLOCK_SIZE = 128
 
     def initialize(map, bsp)
-      @map      = map
-      @bsp      = bsp
+      @map              = map
+      @bsp              = bsp
       build_blockmap
-      @solid_things = collect_solid_things
-      @on_cross = nil
+      @solid_things     = collect_solid_things
+      @on_cross         = nil
+      @teleport_pending = false
     end
 
-    # Set a callback (taking a linedef) that fires once per walk-trigger
-    # linedef the player crossed during a successful slide(). The
-    # callback's job is to dispatch the special and (for W1 once-only
-    # triggers) clear its special_type so it doesn't fire again.
+    # Set a callback (taking a linedef and the crossing side) that fires
+    # once per walk-trigger linedef the player crossed during a successful
+    # slide(). The callback's job is to dispatch the special and (for W1
+    # once-only triggers) clear its special_type so it doesn't fire again.
     attr_writer :on_cross
+
+    # Set by Teleports#teleport_player so slide() knows to return nil
+    # (leaving @player.x/y at the teleport destination) instead of the
+    # pre-teleport movement target.
+    attr_accessor :teleport_pending
 
     # Returns [final_x, final_y] after attempting to move from (x0, y0)
     # to (x1, y1). If the full move fails, tries sliding along each axis
@@ -78,16 +84,20 @@ module Rubydoom
       current_floor = floor_at(x0, y0)
       return [x0, y0] if current_floor.nil?
 
+      @teleport_pending = false
       if try_move(x0, y0, current_floor, x1, y1)
         emit_crossings(x0, y0, x1, y1)
+        return nil if @teleport_pending
         return [x1, y1]
       end
       if dx != 0 && try_move(x0, y0, current_floor, x0 + dx, y0)
         emit_crossings(x0, y0, x0 + dx, y0)
+        return nil if @teleport_pending
         return [x0 + dx, y0]
       end
       if dy != 0 && try_move(x0, y0, current_floor, x0, y0 + dy)
         emit_crossings(x0, y0, x0, y0 + dy)
+        return nil if @teleport_pending
         return [x0, y0 + dy]
       end
       [x0, y0]
@@ -279,7 +289,7 @@ module Rubydoom
         ld = @map.linedefs[ld_index]
         next if ld.special_type.zero?
         next unless segments_cross?(x0, y0, x1, y1, ld)
-        @on_cross.call(ld)
+        @on_cross.call(ld, point_side(x0, y0, ld))
       end
     end
 

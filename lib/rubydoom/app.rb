@@ -45,11 +45,19 @@ module Rubydoom
 
     def initialize(wad_path:, map_name: DEFAULT_MAP, scale: DEFAULT_SCALE,
                    dump_frame_to: nil, show_automap: false,
-                   automap_mode: :lines, skill: nil)
+                   automap_mode: :lines, skill: nil, scenario: nil,
+                   god_mode: false)
       @scale         = scale
       @dump_frame_to = dump_frame_to
       @show_automap  = show_automap
       @automap_mode  = automap_mode
+      # A pre-built `Rubydoom::Map` (typically from `Scenario#build`)
+      # to load instead of resolving `map_name` against the WAD. When
+      # set, map_name is overwritten by the scenario's own name for
+      # captioning / sky-lookup purposes.
+      @scenario      = scenario
+      @god_mode      = god_mode
+      map_name       = @scenario.name if @scenario
 
       # Demo playback (RUBYDOOM_PLAY=path.rdm): the file's header decides
       # the map, skill, and seed — anything passed in is ignored so the
@@ -158,7 +166,12 @@ module Rubydoom
     # (re)build the Gosu-side renderers and update the window caption.
     def load_map(map_name)
       self.caption = "rubydoom — #{map_name}"
-      @game.load_map(map_name)
+      # The scenario, if any, is only loaded the first time — subsequent
+      # transitions fall back to looking up `map_name` in the WAD.
+      target = @scenario || map_name
+      @scenario = nil
+      @game.load_map(target)
+      @game.player.toggle_god! if @god_mode && !@game.player.god_mode
       sky = Sky.for_map(map_name, @game.textures)
       @renderer3d = Renderer3D.new(@game.map, @game.bsp,
                                    textures: @game.textures, flats: @game.flats,

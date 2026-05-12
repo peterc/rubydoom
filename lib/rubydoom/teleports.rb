@@ -31,8 +31,12 @@ module Rubydoom
     # Walk-cross dispatcher. Returns true iff a teleport fired (so
     # the caller can reset camera step-up smoothing). WR is
     # repeatable; the special isn't cleared.
-    def handle_cross(linedef, player)
+    # Vanilla only fires from the front side (side 0); crossing the
+    # back of the line is silently ignored so the player doesn't
+    # re-trigger the teleporter from the landing side.
+    def handle_cross(linedef, player, side = 0)
       return false unless linedef.special_type == WR_TELEPORT
+      return false unless side == 0
       dest = @dests_by_tag[linedef.sector_tag]
       return false unless dest
       teleport_player(player, dest)
@@ -59,6 +63,7 @@ module Rubydoom
       player.x = dest_thing.x.to_f
       player.y = dest_thing.y.to_f
       player.angle = dest_thing.angle.to_f
+      @clipper.teleport_pending = true
       @sound&.play(:telept) if @sound
     end
   end
