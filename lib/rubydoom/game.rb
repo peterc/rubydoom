@@ -141,6 +141,7 @@ module Rubydoom
                                   sound: @sound, noise_alert: @noise_alert,
                                   rng: @rng)
       @monster_ai.clipper = @clipper
+      @monster_ai.floors  = @floors
       @combat.ai  = @monster_ai
       @projectiles = Projectiles.new(@map, @sight, @clipper, @combat,
                                      sound: @sound, rng: @rng)

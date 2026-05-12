@@ -131,6 +131,35 @@ module Rubydoom
       sarg_die4:  s("SARG", "L", 4,  :fall,  :sarg_die5),
       sarg_die5:  s("SARG", "M", 4,  nil,    :sarg_die6),
       sarg_die6:  s("SARG", "N", nil,nil,    nil),
+
+      # --- Baron of Hell (BOSS) ---
+      # 8 stand + 8 run + 3 attack + 2 pain + 7 death. Skips the 7
+      # raise states (S_BOSS_RAISE1..7) since we don't implement
+      # archvile resurrection. Terminal die state fires :boss_death,
+      # which checks E1M8 + last-Baron gating before EV_DoFloor on
+      # tag 666 (vanilla A_BossDeath).
+      boss_stnd:  s("BOSS", "A", 10, :look,  :boss_stnd2),
+      boss_stnd2: s("BOSS", "B", 10, :look,  :boss_stnd),
+      boss_run1:  s("BOSS", "A", 3,  :chase, :boss_run2),
+      boss_run2:  s("BOSS", "A", 3,  :chase, :boss_run3),
+      boss_run3:  s("BOSS", "B", 3,  :chase, :boss_run4),
+      boss_run4:  s("BOSS", "B", 3,  :chase, :boss_run5),
+      boss_run5:  s("BOSS", "C", 3,  :chase, :boss_run6),
+      boss_run6:  s("BOSS", "C", 3,  :chase, :boss_run7),
+      boss_run7:  s("BOSS", "D", 3,  :chase, :boss_run8),
+      boss_run8:  s("BOSS", "D", 3,  :chase, :boss_run1),
+      boss_atk1:  s("BOSS", "E", 8,  :face_target,   :boss_atk2),
+      boss_atk2:  s("BOSS", "F", 8,  :face_target,   :boss_atk3),
+      boss_atk3:  s("BOSS", "G", 8,  :bruisr_attack, :boss_run1),
+      boss_pain:  s("BOSS", "H", 2,  nil,    :boss_pain2),
+      boss_pain2: s("BOSS", "H", 2,  :pain,  :boss_run1),
+      boss_die1:  s("BOSS", "I", 8,  nil,    :boss_die2),
+      boss_die2:  s("BOSS", "J", 8,  :scream,:boss_die3),
+      boss_die3:  s("BOSS", "K", 8,  nil,    :boss_die4),
+      boss_die4:  s("BOSS", "L", 8,  :fall,  :boss_die5),
+      boss_die5:  s("BOSS", "M", 8,  nil,    :boss_die6),
+      boss_die6:  s("BOSS", "N", 8,  nil,    :boss_die7),
+      boss_die7:  s("BOSS", "O", nil,:boss_death, nil),
     }.freeze
 
     def self.[](key)

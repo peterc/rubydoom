@@ -58,6 +58,21 @@ module Rubydoom
       ["MISL", "D", 4],
     ].freeze
 
+    # Baron of Hell fireball stats from MT_BRUISERSHOT. Faster and
+    # heavier-damage than the imp's MT_TROOPSHOT.
+    BRUISER_SHOT_SPEED     = 15.0
+    BRUISER_SHOT_DAMAGE_D  = 8       # = (rand%8 + 1) * 8 = 8..64
+    BRUISER_SHOT_DAMAGE_M  = 8
+    # 3/4 of Baron body height (vanilla `z + height - height/4` with
+    # height = 64).
+    BRUISER_LAUNCH_Z_OFFSET = 48
+    BRUISER_FLIGHT_FRAMES   = ["A", "B"].freeze
+    BRUISER_DEATH_FRAMES    = [
+      ["BAL7", "C", 6],
+      ["BAL7", "D", 6],
+      ["BAL7", "E", 6],
+    ].freeze
+
     # Plasma bolt stats from MT_PLASMA (mobjinfo.h).
     PLASMA_SPEED          = 25.0
     PLASMA_DAMAGE_D       = 8       # direct hit = (rand%8 + 1) * MULT = 5..40
@@ -139,6 +154,46 @@ module Rubydoom
                        :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
                        fireball_damage, :firxpl,
                        FIREBALL_FLIGHT_FRAMES, FIREBALL_DEATH_FRAMES, false)
+      @projs << proj
+      @map.things << thing
+      @sound&.play_at(:firsht, sx, sy, listener, source: owner_mobj)
+      proj
+    end
+
+    # Spawn a Baron of Hell fireball. Same flight machinery as the
+    # imp's missile — different sprite, speed, and damage. Reuses the
+    # MF_SHADOW XY-fuzz rule when the target carries the invisibility
+    # power.
+    def spawn_bruiser_ball(owner_mobj, target, listener: target)
+      sx = owner_mobj.thing.x.to_f
+      sy = owner_mobj.thing.y.to_f
+      sz = owner_z(owner_mobj) + BRUISER_LAUNCH_Z_OFFSET
+
+      tx = target.x.to_f
+      ty = target.y.to_f
+      tz = target_eye_z(target)
+
+      dx = tx - sx
+      dy = ty - sy
+      dist = Math.hypot(dx, dy)
+      dist = 1.0 if dist < 1.0
+      time_to_target = dist / BRUISER_SHOT_SPEED
+
+      ang_rad = Math.atan2(dy, dx)
+      if target.respond_to?(:has_power?) && target.has_power?(:invisibility)
+        ang_rad += (@rng.rand - 0.5) * 2 * (22.5 * Math::PI / 180.0)
+      end
+      vx = BRUISER_SHOT_SPEED * Math.cos(ang_rad)
+      vy = BRUISER_SHOT_SPEED * Math.sin(ang_rad)
+      vz = (tz - sz) / time_to_target
+
+      angle = ang_rad * 180.0 / Math::PI
+
+      thing = Map::Thing.new(sx, sy, angle, 0, 0, false, "BAL7", "A", false, sz)
+      proj  = Proj.new(thing, owner_mobj, sz, vx, vy, vz,
+                       :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
+                       bruiser_shot_damage, :firxpl,
+                       BRUISER_FLIGHT_FRAMES, BRUISER_DEATH_FRAMES, false)
       @projs << proj
       @map.things << thing
       @sound&.play_at(:firsht, sx, sy, listener, source: owner_mobj)
@@ -437,6 +492,10 @@ module Rubydoom
 
     def fireball_damage
       (@rng.rand(IMP_FIREBALL_DAMAGE_D) + 1) * IMP_FIREBALL_DAMAGE_M
+    end
+
+    def bruiser_shot_damage
+      (@rng.rand(BRUISER_SHOT_DAMAGE_D) + 1) * BRUISER_SHOT_DAMAGE_M
     end
 
     def rocket_direct_damage

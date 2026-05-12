@@ -36,16 +36,18 @@ module Rubydoom
 
     # Action handler table: AI dispatch symbol → method name.
     ACTIONS = {
-      look:        :a_look,
-      chase:       :a_chase,
-      face_target: :a_face_target,
-      pos_attack:  :a_pos_attack,
-      spos_attack: :a_spos_attack,
-      troo_attack: :a_troo_attack,
-      sarg_attack: :a_sarg_attack,
-      pain:        :a_pain,
-      scream:      :a_scream,
-      fall:        :a_fall,
+      look:           :a_look,
+      chase:          :a_chase,
+      face_target:    :a_face_target,
+      pos_attack:     :a_pos_attack,
+      spos_attack:    :a_spos_attack,
+      troo_attack:    :a_troo_attack,
+      sarg_attack:    :a_sarg_attack,
+      bruisr_attack:  :a_bruisr_attack,
+      boss_death:     :a_boss_death,
+      pain:           :a_pain,
+      scream:         :a_scream,
+      fall:           :a_fall,
     }.freeze
 
     def initialize(map, combat, sight, movement, sound: nil,
@@ -57,13 +59,15 @@ module Rubydoom
       @sound       = sound
       @noise_alert = noise_alert
       @projectiles = projectiles
+      @floors      = nil
       @rng         = rng
     end
 
     # Late-bind: App wires the Projectiles system after this AI is
     # constructed so the system's @combat ref can already point at the
-    # finished Combat.
-    attr_writer :projectiles
+    # finished Combat. The Floors handle is used by A_BossDeath to
+    # lower tag-666 sectors when the E1M8 Baron arena is cleared.
+    attr_writer :projectiles, :floors
 
     def run_action(symbol, mobj, player)
       method_name = ACTIONS[symbol]
@@ -412,6 +416,42 @@ module Rubydoom
       # wired (older test setups), fall back to the previous no-op so the
       # state machine still completes.
       @projectiles&.spawn_imp_fireball(mobj, player, listener: player)
+    end
+
+    # Baron of Hell: claw at melee range, else spits a green fireball
+    # (MT_BRUISERSHOT). Vanilla A_BruisAttack: melee damage `(rand%8 +
+    # 1) * 10` = 10..80, sound dsclaw on hit. Out of melee the missile
+    # leaves on its own deathsound path; we don't play attack_sound
+    # here because the missile path uses dsfirsht inside the spawn.
+    def a_bruisr_attack(mobj, player)
+      return unless mobj.target
+      if approx_dist(mobj, player.x, player.y) <= MELEE_RANGE + 20
+        play_attack_sound(mobj, player)   # dsclaw
+        damage = (1 + @rng.rand(8)) * 10
+        player.take_damage(damage)
+        return
+      end
+      @projectiles&.spawn_bruiser_ball(mobj, player, listener: player)
+    end
+
+    # E1M8 boss-arena gate. Runs from the terminal Baron death frame
+    # (S_BOSS_DIE7). Vanilla A_BossDeath gates by gameepisode+gamemap
+    # and mobj type, walks every thinker to see whether any other live
+    # mobj of the same type remains, and when the arena is clear fires
+    # `EV_DoFloor(666, lowerFloorToLowest)`. We mirror that exactly,
+    # minus the multiplayer "is a player still alive" check (we always
+    # have a single live player) and minus the E2/E3/E4 / commercial
+    # branches (we only ship E1).
+    BARON_DOOMEDNUM = 3003
+
+    def a_boss_death(mobj, _player)
+      return unless @map.name == "E1M8"
+      return unless mobj.info == MonsterInfo[BARON_DOOMEDNUM]
+      other_alive = @combat.monsters.any? do |m|
+        m.equal?(mobj) ? false : m.info == mobj.info && m.health > 0
+      end
+      return if other_alive
+      @floors&.activate_lower_to_lowest(666)
     end
 
     # Demon: bite for melee damage when in range.

@@ -180,6 +180,11 @@ module Rubydoom
         if mobj.state == :dying
           mobj.state = :dead
         end
+        # Terminal-frame actions still need to run — A_BossDeath fires
+        # from the last Baron death frame to drop the tag-666 floor.
+        if st && st.action && @ai && @player
+          @ai.run_action(st.action, mobj, @player)
+        end
         return
       end
       apply_monster_frame(mobj, st)

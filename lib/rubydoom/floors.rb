@@ -163,10 +163,13 @@ module Rubydoom
       fired
     end
 
+    public
+
     # Vanilla `lowerFloorToLowest`. Drops the tagged sector's floor
     # to the lowest neighbouring floor height — the canonical use is
     # an arena revealing its exit teleporter once the bosses fall.
-    # Skips sectors that are already at or below that height.
+    # Skips sectors that are already at or below that height. Public
+    # because `A_BossDeath` calls it directly (no triggering linedef).
     def activate_lower_to_lowest(tag)
       fired = false
       @map.sectors.each do |s|
@@ -179,6 +182,8 @@ module Rubydoom
       end
       fired
     end
+
+    private
 
     def lowest_neighbor_floor(sector)
       list = neighbors_of(sector)

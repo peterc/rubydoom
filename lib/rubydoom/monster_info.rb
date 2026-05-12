@@ -101,6 +101,25 @@ module Rubydoom
         active_sound: :dmact,
         flags: FLAG_COUNTKILL,
       ),
+      # Baron of Hell (BOSS) — health 1000, E1M8 boss. Melee claw or
+      # spits an MT_BRUISERSHOT fireball depending on range. Same trick
+      # as the imp: melee_state == missile_state, so a_chase enters
+      # the shared attack sequence and a_bruisr_attack decides at
+      # runtime which mode based on actual range.
+      Info.new(
+        doomednum: 3003, health: 1000, radius: 24, height: 64,
+        speed: 8, pain_chance: 50, reaction_time: 8,
+        spawn_state:   :boss_stnd,
+        see_state:     :boss_run1,
+        pain_state:    :boss_pain,
+        melee_state:   :boss_atk1,
+        missile_state: :boss_atk1,
+        death_state:   :boss_die1,
+        see_sound:    :brssit, pain_sound: :dmpain,
+        death_sound:  :brsdth, attack_sound: :claw,
+        active_sound: :dmact,
+        flags: FLAG_COUNTKILL,
+      ),
     ].freeze
 
     BY_DOOMEDNUM = ENTRIES.each_with_object({}) { |info, h| h[info.doomednum] = info }.freeze
