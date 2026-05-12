@@ -171,7 +171,7 @@ Claude and Codex did not do a perfect job on their own, however, and after profi
 
 ## Similar projects
 
-* [khasinski/doom](https://github.com/khasinski/doom) by Chris Hasinski is a *"faithful port of the DOOM (1993) engine to pure Ruby."* It, too, uses Gosu.
+* [khasinski/doom](https://github.com/khasinski/doom) by Chris Hasinski is a *"faithful port of the DOOM (1993) engine to pure Ruby."* It, too, uses Gosu and was also built with a benchmarking goal [which even resulted in patches to CRuby's ZJIT](https://bsky.app/profile/kris.cdaction.pl/post/3mlnna4hjis26).
 * [GORE](https://github.com/AndreRenaud/Gore) and [cznic/doomgeneric](https://gitlab.com/cznic/doomgeneric/) are Go ports of Doom which use an interesting process of directly converting C code to Go.
 * Three.js creator mrdoob is [working on a Three.js port of Doom](https://x.com/mrdoob/status/2054075364432031991) which uses a rather different rendering approach.
 
