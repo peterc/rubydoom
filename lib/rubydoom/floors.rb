@@ -2,27 +2,53 @@ module Rubydoom
   # One-shot floor movement. Mirrors the subset of vanilla's
   # T_MoveFloor we need.
   #
-  # Currently implements:
-  #   * type 36 — W1 Floor Lower (TURBO): drops to the highest
-  #     surrounding floor (plus 8 mu of "lip" so the step is visible
-  #     if different). 4 mu/tic. Used in E1M1 to drop the demon-trap
-  #     floor in front of the secret-area entrance.
-  #   * type 20 — S1 Floor Raise To Next Higher (Change Tex & Type):
-  #     raises the tagged floor to the lowest neighbouring floor
-  #     strictly higher than itself. 1 mu/tic (vanilla FLOORSPEED).
-  #     Used by switches in E1M3 onward. Vanilla also transfers the
-  #     floor flat and sector special from the donor sector; that
-  #     cosmetic step is TODO.
+  # Currently implements (all vanilla `EV_DoFloor` actions, all on
+  # `Floors.handle_cross` for walk-triggers or `Floors.handle_use` for
+  # switches; the dispatcher above us decides whether the linedef's
+  # special_type should be cleared based on once-only vs repeatable):
   #
-  # W1 specials get cleared by the trigger dispatcher in Clipper after
-  # this class returns true. S1 specials are cleared by Switches.
+  #   * type 36 / 98 — W1 turboLower. Drops to the highest surrounding
+  #     floor plus 8 mu of "lip" so the step is visible. 4 mu/tic.
+  #     36 is E1M1's demon-trap drop; 98 appears on E1M5.
+  #   * type 70    — SR turboLower. Switch-triggered repeatable
+  #     variant of 36/98. Same physics.
+  #   * type 5 / 91 — W1 raiseFloor. Rises to (lowest neighbouring
+  #     ceiling − 8). Slow. Common "barrier raises" trick.
+  #   * type 20 / 22 — S1 / W1 raiseFloorToNearest+ChangeTex. Raises
+  #     to the lowest neighbouring floor strictly higher than itself.
+  #     1 mu/tic. Vanilla also transfers floor flat + sector special
+  #     from the donor sector; cosmetic TODO.
+  #   * type 18 / 86 — S1 / WR raiseFloorToNearest. Same destination
+  #     as 20/22 but no texture transfer (already a no-op for us).
+  #
+  # Returns `:w1` / `:wr` from `handle_cross` so the walk-cross
+  # dispatcher can decide whether to clear the special; once-only
+  # switch dispatch (`handle_use`) just returns a boolean since the
+  # Switches class drives clearing through ONCE_ONLY.
   class Floors
     FLOOR_SPEED_FAST   = 4    # turboLower speed, mu/tic
     FLOOR_SPEED_NORMAL = 1    # vanilla FLOORSPEED
     LIP                = 8    # vanilla "see what's behind" offset
+    # Vanilla raiseFloor stops 8 mu below the lowest neighbouring
+    # ceiling for sky-flat sectors only (so the floor doesn't punch
+    # into the sky texture). Non-sky sectors raise all the way up.
+    SKY_CEILING_GAP    = 8
+    SKY_FLAT_NAME      = "F_SKY1"
 
-    W1_LOWER_FAST       = 36
-    S1_RAISE_NEXT_CHGTX = 20
+    # Walk-trigger linedef specials, grouped by once-only vs repeatable.
+    W1_LOWER_FAST            = 36
+    W1_LOWER_FAST_NOLIP      = 98   # vanilla also calls turboLower
+    W1_RAISE_TO_LOW_CEIL_A   = 5
+    W1_RAISE_TO_LOW_CEIL_B   = 91
+    W1_RAISE_TO_NEXT_CHGTX   = 22
+    WR_RAISE_TO_NEXT         = 86
+
+    # Switch (use) linedef specials.
+    S1_RAISE_NEXT_CHGTX      = 20
+    S1_RAISE_TO_NEXT         = 18
+    S1_LOWER_TO_LOWEST       = 23
+    SR_LOWER_FAST            = 70
+    WR_LOWER_TO_LOWEST       = 82
 
     Mover = Struct.new(:sector, :dest, :speed, :direction, :done)
 
@@ -34,11 +60,21 @@ module Rubydoom
 
     def handle_cross(linedef)
       case linedef.special_type
-      when W1_LOWER_FAST
+      when W1_LOWER_FAST, W1_LOWER_FAST_NOLIP
         activate_lower_fast(linedef.sector_tag)
-        true
-      else
-        false
+        :w1
+      when W1_RAISE_TO_LOW_CEIL_A, W1_RAISE_TO_LOW_CEIL_B
+        activate_raise_to_low_ceiling(linedef.sector_tag)
+        :w1
+      when W1_RAISE_TO_NEXT_CHGTX
+        activate_raise_to_next(linedef.sector_tag)
+        :w1
+      when WR_RAISE_TO_NEXT
+        activate_raise_to_next(linedef.sector_tag)
+        :wr
+      when WR_LOWER_TO_LOWEST
+        activate_lower_to_lowest(linedef.sector_tag)
+        :wr
       end
     end
 
@@ -47,8 +83,12 @@ module Rubydoom
     # swap the SW1/SW2 texture).
     def handle_use(linedef)
       case linedef.special_type
-      when S1_RAISE_NEXT_CHGTX
+      when S1_RAISE_NEXT_CHGTX, S1_RAISE_TO_NEXT
         activate_raise_to_next(linedef.sector_tag)
+      when S1_LOWER_TO_LOWEST
+        activate_lower_to_lowest(linedef.sector_tag)
+      when SR_LOWER_FAST
+        activate_lower_fast(linedef.sector_tag)
       else
         false
       end
@@ -77,6 +117,7 @@ module Rubydoom
     private
 
     def activate_lower_fast(tag)
+      fired = false
       @map.sectors.each do |s|
         next unless s.tag == tag
         next if @active[s.object_id]
@@ -84,7 +125,9 @@ module Rubydoom
         dest += LIP if dest != s.floor_height
         next if dest >= s.floor_height
         @active[s.object_id] = Mover.new(s, dest, FLOOR_SPEED_FAST, :down, false)
+        fired = true
       end
+      fired
     end
 
     def activate_raise_to_next(tag)
@@ -98,6 +141,55 @@ module Rubydoom
         fired = true
       end
       fired
+    end
+
+    # Vanilla raiseFloor destination: lowest neighbouring CEILING
+    # minus 8 mu. The −8 leaves a sliver so the moving sector doesn't
+    # spear through the lowest adjacent ceiling. Skips the sector if
+    # the destination would be at or below its current floor (the
+    # "no movement possible" guard).
+    def activate_raise_to_low_ceiling(tag)
+      fired = false
+      @map.sectors.each do |s|
+        next unless s.tag == tag
+        next if @active[s.object_id]
+        dest = lowest_neighbor_ceiling(s)
+        dest = [dest, s.ceiling_height].min   # clamp to our own ceiling
+        dest -= SKY_CEILING_GAP if s.floor_texture == SKY_FLAT_NAME
+        next if dest <= s.floor_height
+        @active[s.object_id] = Mover.new(s, dest, FLOOR_SPEED_NORMAL, :up, false)
+        fired = true
+      end
+      fired
+    end
+
+    # Vanilla `lowerFloorToLowest`. Drops the tagged sector's floor
+    # to the lowest neighbouring floor height — the canonical use is
+    # an arena revealing its exit teleporter once the bosses fall.
+    # Skips sectors that are already at or below that height.
+    def activate_lower_to_lowest(tag)
+      fired = false
+      @map.sectors.each do |s|
+        next unless s.tag == tag
+        next if @active[s.object_id]
+        dest = lowest_neighbor_floor(s)
+        next if dest.nil? || dest >= s.floor_height
+        @active[s.object_id] = Mover.new(s, dest, FLOOR_SPEED_NORMAL, :down, false)
+        fired = true
+      end
+      fired
+    end
+
+    def lowest_neighbor_floor(sector)
+      list = neighbors_of(sector)
+      return nil if list.nil? || list.empty?
+      list.map(&:floor_height).min
+    end
+
+    def lowest_neighbor_ceiling(sector)
+      list = neighbors_of(sector)
+      return sector.ceiling_height if list.nil? || list.empty?
+      list.map(&:ceiling_height).min
     end
 
     def highest_neighbor_floor(sector)

@@ -30,6 +30,7 @@ module Rubydoom
     DOOR_SPEED_TIC = 2     # units per tic (DOOM-spec)
     WAIT_TICS      = 150   # ~4.3s at 35 tics/sec (DOOM-spec)
     DOOR_GAP       = 4     # final opening sits this far below the lowest neighbor ceiling
+    CLOSE30_WAIT_TICS = 30 * 35  # vanilla close30ThenOpen wait — 30 seconds
 
     # special_type → {kind:, key:}.
     #   kind: :dr (repeat, close after delay) or :d1 (once, stay open).
@@ -85,15 +86,43 @@ module Rubydoom
     # `:w1` for once-only (caller clears special_type), `:wr` for
     # repeatable, or nil if the linedef isn't a recognised door
     # trigger. Currently:
-    #   * type 2  — W1 Door Open Stay (remote by tag)
+    #   * type  2 — W1 Door Open Stay (remote by tag)
+    #   * type 16 — W1 Door Close 30 Sec (close, wait 30 sec, reopen)
+    #   * type 76 — WR Door Close 30 Sec
     #   * type 90 — WR Door Open Stay (remote by tag, repeatable)
     def handle_cross(linedef)
       case linedef.special_type
       when 2  # W1 Door Open Stay
         open_tagged(linedef.sector_tag, kind: :d1) ? :w1 : nil
+      when 16 # W1 Door Close 30 Sec
+        close30_tagged(linedef.sector_tag) ? :w1 : nil
+      when 76 # WR Door Close 30 Sec
+        close30_tagged(linedef.sector_tag) ? :wr : nil
       when 90 # WR Door Open Stay
         open_tagged(linedef.sector_tag, kind: :d1) ? :wr : nil
       end
+    end
+
+    # Vanilla `close30ThenOpen`. The tagged door is currently open;
+    # this lowers its ceiling to the floor (close), waits 30 seconds,
+    # then raises it back up. The reopened ceiling sits at the lowest
+    # neighbour ceiling − DOOR_GAP (same final height vanilla uses).
+    # Returns true iff at least one sector started the close.
+    def close30_tagged(tag)
+      fired = false
+      @map.sectors.each do |sector|
+        next unless sector.tag == tag
+        next if @active[sector.object_id]
+        # We remember the current ceiling so the reopen step can
+        # restore the original opening height instead of recomputing
+        # from the neighbours (vanilla does the same — `topheight`
+        # is captured at trigger time).
+        @active[sector.object_id] =
+          Door.new(sector, sector.ceiling_height, :closing, 0, :close30)
+        play_door_sound(sector, :dorcls)
+        fired = true
+      end
+      fired
     end
 
     # Remote-tag door trigger. Vanilla EV_DoDoor: open every sector
@@ -124,8 +153,10 @@ module Rubydoom
           d.sector.ceiling_height += DOOR_SPEED_TIC
           if d.sector.ceiling_height >= d.top_height
             d.sector.ceiling_height = d.top_height
-            if d.kind == :d1
-              d.state = :done   # stays open; will be reaped below
+            # :d1 and :close30 both reach their open position and stay.
+            # :dr (regular use-door) hangs at the top for WAIT_TICS.
+            if d.kind == :d1 || d.kind == :close30
+              d.state = :done
             else
               d.state = :waiting
               d.timer = WAIT_TICS
@@ -137,10 +168,21 @@ module Rubydoom
             d.state = :closing
             play_door_sound(d.sector, :dorcls)
           end
+        when :wait_closed
+          # close30ThenOpen pause between close and reopen.
+          d.timer -= 1
+          if d.timer <= 0
+            d.state = :opening
+            play_door_sound(d.sector, :doropn)
+          end
         when :closing
           d.sector.ceiling_height -= DOOR_SPEED_TIC
           if d.sector.ceiling_height <= d.sector.floor_height
             d.sector.ceiling_height = d.sector.floor_height
+            if d.kind == :close30
+              d.state = :wait_closed
+              d.timer = CLOSE30_WAIT_TICS
+            end
           end
         end
       end

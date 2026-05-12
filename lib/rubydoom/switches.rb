@@ -35,6 +35,9 @@ module Rubydoom
     SR_DOOR_OPEN_CLOSE   = 63
     SR_LIFT_LOWER_RAISE  = 62
     S1_FLOOR_RAISE_NEXT  = 20
+    S1_FLOOR_RAISE_NEXT_PLAIN = 18
+    S1_FLOOR_LOWER_LOWEST = 23
+    SR_FLOOR_LOWER_FAST  = 70
     S1_DONUT             = 9
     GR_DOOR_OPEN_STAY    = 46
 
@@ -44,7 +47,7 @@ module Rubydoom
     # player gets the click animation.
     ONCE_ONLY = [
       S1_EXIT_LEVEL, S1_EXIT_SECRET, S1_DOOR_OPEN_STAY, S1_FLOOR_RAISE_NEXT,
-      S1_DONUT,
+      S1_FLOOR_RAISE_NEXT_PLAIN, S1_FLOOR_LOWER_LOWEST, S1_DONUT,
     ].freeze
 
     attr_reader :exit_requested, :secret_exit_requested
@@ -86,7 +89,8 @@ module Rubydoom
             @doors&.open_tagged(ld.sector_tag, kind: :dr)
           when SR_LIFT_LOWER_RAISE
             @plats&.activate_tag(ld.sector_tag)
-          when S1_FLOOR_RAISE_NEXT
+          when S1_FLOOR_RAISE_NEXT, S1_FLOOR_RAISE_NEXT_PLAIN,
+               S1_FLOOR_LOWER_LOWEST, SR_FLOOR_LOWER_FAST
             @floors&.handle_use(ld)
           when S1_DONUT
             @donuts&.handle_use(ld)

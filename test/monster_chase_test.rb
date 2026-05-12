@@ -4,13 +4,17 @@ require "test_helper"
 # player and eventually deals damage.
 class MonsterChaseTest < Minitest::Test
   def setup
+    # Pinning the RNG keeps the combat dice (spread, damage rolls,
+    # pain chance) deterministic — without it the zombie's 22.5°
+    # spread misses the player ~60% of the time and the test flakes.
+    rng = Random.new(42)
     @map     = Rubydoom::Map.load(TestHelper.wad, "E1M1", skill: 3)
     @bsp     = Rubydoom::Bsp.new(@map.nodes)
     @clipper = Rubydoom::Clipper.new(@map, @bsp)
-    @combat  = Rubydoom::Combat.new(@map)
+    @combat  = Rubydoom::Combat.new(@map, rng: rng)
     @sight   = Rubydoom::Sight.new(@map, @clipper)
-    @movement = Rubydoom::MonsterMovement.new(@map, @clipper, @combat)
-    @ai = Rubydoom::MonsterAI.new(@map, @combat, @sight, @movement)
+    @movement = Rubydoom::MonsterMovement.new(@map, @clipper, @combat, rng: rng)
+    @ai = Rubydoom::MonsterAI.new(@map, @combat, @sight, @movement, rng: rng)
     @ai.clipper = @clipper
     @combat.ai  = @ai
   end

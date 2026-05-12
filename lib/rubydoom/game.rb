@@ -253,8 +253,8 @@ module Rubydoom
       fired =
         if @plats.handle_cross(ld)
           true  # WR — leave special intact.
-        elsif @floors.handle_cross(ld)
-          ld.special_type = 0  # W1 — consumed.
+        elsif (floor_result = @floors.handle_cross(ld))
+          ld.special_type = 0 if floor_result == :w1
           true
         elsif (door_result = @doors.handle_cross(ld))
           ld.special_type = 0 if door_result == :w1
