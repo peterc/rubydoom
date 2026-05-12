@@ -87,6 +87,18 @@ module Rubydoom
       best_hit == :wall ? [:wall, hx, hy, best_ld] : [:thing, best_hit, hx, hy]
     end
 
+    # Public autoaim helper — returns the vertical slope the player's
+    # weapons should aim at. Same logic used internally by #fire, but
+    # exposed so the rocket launcher (and any future projectile weapon)
+    # can compute its initial vz.
+    def aim_slope(player, range: DEFAULT_RANGE, shootables: nil)
+      rad = player.angle * Math::PI / 180.0
+      dx  = Math.cos(rad)
+      dy  = Math.sin(rad)
+      eye = (@clipper.floor_at(player.x, player.y) || 0) + player.view_height
+      autoaim_slope(player.x, player.y, dx, dy, eye, range, shootables)
+    end
+
     private
 
     # Find the nearest shootable on the XY ray that the player has a

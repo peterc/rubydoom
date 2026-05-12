@@ -184,6 +184,25 @@ module Rubydoom
       end
     end
 
+    # Vanilla P_RadiusAttack with linear falloff (EXPLOSION_MAX_DAMAGE
+    # at the center, 0 at EXPLOSION_RADIUS). `source` is the attacker
+    # that gets credit for kills and is also subject to self-damage if
+    # it's a Player (rocket-jump). `ignore` is excluded — used by
+    # barrels so they don't damage themselves mid-explosion. Public
+    # so Projectiles can detonate rockets through the same path.
+    def radius_attack(cx, cy, source: nil, ignore: nil)
+      if source && source.respond_to?(:take_damage) && !source.respond_to?(:info)
+        # Player path — pseudo-mobj with .x/.y and #take_damage.
+        amt = falloff_damage(cx, cy, source.x, source.y)
+        source.take_damage(amt) if amt > 0
+      end
+      @mobjs.each do |other|
+        next if other == ignore || other.state != :alive
+        amt = falloff_damage(cx, cy, other.thing.x.to_f, other.thing.y.to_f)
+        damage(other, amt, source: source) if amt > 0
+      end
+    end
+
     private
 
     def spawn_barrel(thing)
@@ -276,21 +295,7 @@ module Rubydoom
       cx = mobj.thing.x.to_f
       cy = mobj.thing.y.to_f
       @sound&.play_at(:barexp, cx, cy, source, source: mobj) if source
-      if source
-        damage_amt = falloff_damage(cx, cy, source.x, source.y)
-        source.take_damage(damage_amt) if damage_amt > 0
-      end
-      # Damage every other live mobj within range with the same
-      # linear falloff vanilla P_RadiusAttack uses — barrel does
-      # 128 max at point-blank, 0 at 128 units. This means a barrel
-      # can kill a POSS (20 HP) at up to ~100 units, take a SPOS
-      # (30 HP) out at ~96, and seriously hurt a TROO (60 HP) up
-      # close. Chain-detonation between barrels still works because
-      # barrels at near-zero distance take >>20 damage.
-      @mobjs.select { |m| m != mobj && m.state == :alive }.each do |other|
-        amt = falloff_damage(cx, cy, other.thing.x.to_f, other.thing.y.to_f)
-        damage(other, amt, source: source) if amt > 0
-      end
+      radius_attack(cx, cy, source: source, ignore: mobj)
     end
 
     def falloff_damage(cx, cy, tx, ty)

@@ -90,11 +90,14 @@ module Rubydoom
         ammo: nil,
       },
       rocket: {
-        # Rocket launcher fires a projectile, not a hitscan; we don't
-        # have a projectile system yet, so trigger-pull is a no-op
-        # animation that returns to idle. Pickup logic still works.
+        # Vanilla S_MISSILE1/2: 8-tic gunflash + 12-tic fire frame.
+        # We collapse both onto MISGB and fire on entry to the first
+        # frame — A_GunFlash is a cosmetic muzzle flash we don't model.
         idle: "MISGA0",
-        fire_seq: [],
+        fire_seq: [
+          ["MISGB0", 8, :fire_rocket],
+          ["MISGB0", 12],
+        ],
         ammo: :rocket,
       },
       plasma: { idle: "PLSGA0", fire_seq: [], ammo: :cell },
@@ -119,6 +122,7 @@ module Rubydoom
       fire_pistol:   :pistol,
       fire_shotgun:  :shotgn,
       fire_chaingun: :pistol,   # vanilla chaingun uses the pistol sample
+      fire_rocket:   :rlaunc,
       punch:         :punch,
       saw:           :sawful,
     }.freeze
@@ -146,6 +150,10 @@ module Rubydoom
     # blocking line carries a non-zero special_type. Game wires this
     # to its gun-trigger dispatch (type 46 GR doors, etc.).
     attr_writer :wall_hit_handler
+
+    # Projectiles system, late-bound. Needed by the rocket launcher
+    # to spawn an MT_ROCKET in flight.
+    attr_writer :projectiles
 
     # Lump name to render this frame. While firing, returns the current
     # frame's lump; otherwise returns the weapon's idle lump. `player`
@@ -245,6 +253,7 @@ module Rubydoom
       when :fire_pistol   then fire_pistol(player)
       when :fire_shotgun  then fire_shotgun(player)
       when :fire_chaingun then fire_chaingun(player)
+      when :fire_rocket   then fire_rocket(player)
       when :punch         then punch(player)
       when :saw           then saw(player)
       end
@@ -313,6 +322,13 @@ module Rubydoom
       consume_ammo(player, :shell)
       # 7 pellets, ±5.6° horizontal spread (vanilla SHOTGUNSPREAD).
       7.times { shoot(player, bullet_damage, spread_deg: 5.6) }
+    end
+
+    def fire_rocket(player)
+      return unless @projectiles
+      consume_ammo(player, :rocket)
+      slope = @hitscan.aim_slope(player, shootables: @combat&.shootables)
+      @projectiles.spawn_rocket(player, slope: slope)
     end
 
     def punch(player)

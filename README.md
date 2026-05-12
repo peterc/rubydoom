@@ -25,7 +25,7 @@ bin/rubydoom --map E1M3 doom1.wad     # play a different map / wad
 Default controls: WASD or arrow keys to move, mouse to look (click in the window to capture the cursor, Esc to release), left-Ctrl or left-mouse to fire, Space to use, 1–7 to switch weapons, Tab toggles the automap, P prints the current world position to stdout for debugging purposes. Arrow keys can be used to rotate left/right, if you want to avoid using the mouse entirely.
 
 > [!TIP]
-> Pressing "G" while in game enables GOD MODE if you suck like me!! 😂
+> Pressing "G" while in game enables GOD MODE if you suck like me!! 😂 As well as fixing your health at 100%, it also gives you all the weapons for a fun test.
 
 
 ## Benchmarking

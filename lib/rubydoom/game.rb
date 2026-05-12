@@ -134,6 +134,7 @@ module Rubydoom
                                 sound: @sound, noise_alert: @noise_alert,
                                 rng: @rng)
       @weapons.clipper = @clipper
+      @weapons.projectiles = @projectiles
       @weapons.wall_hit_handler = method(:handle_gun_cross)
       @hud.weapons = @weapons if @hud
 
@@ -262,6 +263,21 @@ module Rubydoom
       @noise_alert.alert(@player, sec_index)
     end
 
+    # Weapons whose assets are actually present in this WAD. Shareware
+    # `doom1.wad` ships sprites for fist/pistol/shotgun/chaingun/
+    # chainsaw/rocket but not plasma (PLSGA0) or BFG (BFGGA0) — those
+    # are silently filtered so god mode doesn't hand the player a gun
+    # whose idle sprite would crash the renderer. We check the idle
+    # PSPR and, for the rocket, the in-flight projectile sprite the
+    # renderer needs (any MISLA rotation).
+    def present_weapons
+      Weapons::INFO.each_key.select do |w|
+        next false unless @wad.lump(Weapons::INFO[w][:idle])
+        next false if w == :rocket && (1..8).none? { |r| @wad.lump("MISLA#{r}") }
+        true
+      end
+    end
+
     # Edge-detect player-health drops between tics so we can play the
     # pain sound (vanilla dsplpain at <=quartered health, dsoof for
     # smaller hits; we just use dsplpain for any damage).
@@ -384,6 +400,7 @@ module Rubydoom
         case edge
         when :toggle_god
           on = @player.toggle_god!
+          @player.grant_weapons(present_weapons) if on
           puts "[god mode] #{on ? "ON" : "OFF"}"
         when :use
           @doors.try_use(@player) || @switches.try_use(@player)

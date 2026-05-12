@@ -1,8 +1,9 @@
 module Rubydoom
-  # In-flight monster missiles. Today: just the imp fireball
-  # (MT_TROOPSHOT). A projectile is a synthetic Thing that gets pushed
-  # into `map.things` so the renderer picks it up like any other sprite,
-  # plus a parallel record carrying its velocity and animation state.
+  # In-flight missiles — imp fireballs (MT_TROOPSHOT) and player
+  # rockets (MT_ROCKET). A projectile is a synthetic Thing that gets
+  # pushed into `map.things` so the renderer picks it up like any other
+  # sprite, plus a parallel record carrying its velocity and animation
+  # state.
   #
   # Each tic:
   #   * Advance position by (vx, vy, vz).
@@ -33,28 +34,47 @@ module Rubydoom
     # 3/4 of imp body height (vanilla `z + height - height/4`).
     IMP_LAUNCH_Z_OFFSET    = 32
 
-    # Flight-frame alternation timing. The vanilla state pair runs
-    # 4 tics each — BAL1 A bright 4 ↔ BAL1 B bright 4.
+    # Flight-frame alternation timing. The vanilla imp-fireball state
+    # pair runs 4 tics each — BAL1 A bright 4 ↔ BAL1 B bright 4.
     FLIGHT_FRAME_TICS      = 4
 
-    # Death frames after impact: BAL1 C / D / E at 6 tics each.
-    DEATH_FRAMES = [
+    # Fireball-specific frames.
+    FIREBALL_FLIGHT_FRAMES = ["A", "B"].freeze
+    FIREBALL_DEATH_FRAMES  = [
       ["BAL1", "C", 6],
       ["BAL1", "D", 6],
       ["BAL1", "E", 6],
     ].freeze
 
-    # Hard cap so a fireball that doesn't hit anything (open sky-ish
+    # Rocket stats from MT_ROCKET (mobjinfo.h).
+    ROCKET_SPEED          = 20.0
+    ROCKET_DAMAGE_D       = 8       # direct hit = (rand%8 + 1) * MULT = 20..160
+    ROCKET_DAMAGE_M       = 20
+    ROCKET_LAUNCH_Z_OFFSET = 32      # ≈ floor + height/2 from the player's feet
+    ROCKET_FLIGHT_FRAMES = ["A"].freeze
+    ROCKET_DEATH_FRAMES  = [
+      ["MISL", "B", 8],
+      ["MISL", "C", 6],
+      ["MISL", "D", 4],
+    ].freeze
+
+    # Hard cap so a projectile that doesn't hit anything (open sky-ish
     # geometry, or a target out of range) doesn't live forever. 175 tics
-    # ≈ 5 seconds, which is plenty given the fireball's 10 mu/tic speed.
+    # ≈ 5 seconds, which is plenty given the fireball's 10 mu/tic speed
+    # and the rocket's 20.
     MAX_TICS               = 175
 
     # Internal projectile record: the synthetic Thing the renderer reads
-    # plus the fields the system mutates each tic.
+    # plus the fields the system mutates each tic. `flight_frames` is
+    # the list of frame letters cycled while flying (one entry = no
+    # alternation). `death_frames` is the impact animation sequence.
+    # `splash` enables P_RadiusAttack on detonation (rockets, not
+    # fireballs).
     Proj = Struct.new(
       :thing, :owner, :z, :vx, :vy, :vz,
       :state, :frame_index, :frame_timer, :anim_phase, :tics_alive,
       :damage, :deathsound,
+      :flight_frames, :death_frames, :splash,
     )
 
     def initialize(map, sight, clipper, combat, sound: nil, rng: Random.new)
@@ -96,10 +116,38 @@ module Rubydoom
       thing = Map::Thing.new(sx, sy, angle, 0, 0, false, "BAL1", "A", false, sz)
       proj  = Proj.new(thing, owner_mobj, sz, vx, vy, vz,
                        :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
-                       roll_damage, :firxpl)
+                       fireball_damage, :firxpl,
+                       FIREBALL_FLIGHT_FRAMES, FIREBALL_DEATH_FRAMES, false)
       @projs << proj
       @map.things << thing
       @sound&.play_at(:firsht, sx, sy, listener, source: owner_mobj)
+      proj
+    end
+
+    # Spawn a player rocket along the player's facing, with the given
+    # vertical autoaim slope. Direct-hit damage rolls 20..160; on
+    # impact the rocket triggers a P_RadiusAttack splash (Combat#
+    # radius_attack) using the player as the source, so the player can
+    # rocket-jump (or kill themselves at point-blank).
+    def spawn_rocket(player, slope: 0.0)
+      ang = player.angle * Math::PI / 180.0
+      dx  = Math.cos(ang)
+      dy  = Math.sin(ang)
+      sx  = player.x.to_f
+      sy  = player.y.to_f
+      sz  = (@clipper.floor_at(sx, sy) || 0) + ROCKET_LAUNCH_Z_OFFSET
+      vx  = ROCKET_SPEED * dx
+      vy  = ROCKET_SPEED * dy
+      vz  = ROCKET_SPEED * slope
+
+      thing = Map::Thing.new(sx, sy, player.angle, 0, 0, false, "MISL", "A", false, sz)
+      proj  = Proj.new(thing, player, sz, vx, vy, vz,
+                       :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
+                       rocket_direct_damage, :barexp,
+                       ROCKET_FLIGHT_FRAMES, ROCKET_DEATH_FRAMES, true)
+      @projs << proj
+      @map.things << thing
+      @sound&.play_at(:rlaunc, sx, sy, player, source: player)
       proj
     end
 
@@ -182,12 +230,12 @@ module Rubydoom
       return if proj.frame_timer > 0
 
       proj.frame_index += 1
-      if proj.frame_index >= DEATH_FRAMES.size
+      if proj.frame_index >= proj.death_frames.size
         proj.thing.removed = true
         proj.state         = :dead
         return
       end
-      sprite, frame, tics = DEATH_FRAMES[proj.frame_index]
+      sprite, frame, tics = proj.death_frames[proj.frame_index]
       proj.thing.sprite_override = sprite
       proj.thing.frame_override  = frame
       proj.frame_timer = tics
@@ -196,8 +244,10 @@ module Rubydoom
     def advance_flight_anim(proj)
       proj.frame_timer -= 1
       return if proj.frame_timer > 0
-      proj.anim_phase = proj.anim_phase.zero? ? 1 : 0
-      proj.thing.frame_override = proj.anim_phase.zero? ? "A" : "B"
+      frames = proj.flight_frames
+      return if frames.length <= 1   # single-frame flight (rocket)
+      proj.anim_phase = (proj.anim_phase + 1) % frames.length
+      proj.thing.frame_override = frames[proj.anim_phase]
       proj.frame_timer = FLIGHT_FRAME_TICS
     end
 
@@ -220,11 +270,15 @@ module Rubydoom
       end
       proj.state                 = :exploding
       proj.frame_index           = 0
-      sprite, frame, tics        = DEATH_FRAMES[0]
+      sprite, frame, tics        = proj.death_frames[0]
       proj.thing.sprite_override = sprite
       proj.thing.frame_override  = frame
       proj.frame_timer           = tics
       proj.vx = proj.vy = proj.vz = 0.0
+      if proj.splash
+        @combat.radius_attack(proj.thing.x.to_f, proj.thing.y.to_f,
+                              source: proj.owner)
+      end
     end
 
     # Test the projectile's AABB against the player and every live
@@ -278,8 +332,12 @@ module Rubydoom
       end
     end
 
-    def roll_damage
+    def fireball_damage
       (@rng.rand(IMP_FIREBALL_DAMAGE_D) + 1) * IMP_FIREBALL_DAMAGE_M
+    end
+
+    def rocket_direct_damage
+      (@rng.rand(ROCKET_DAMAGE_D) + 1) * ROCKET_DAMAGE_M
     end
 
     def owner_z(owner_mobj)

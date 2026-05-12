@@ -174,6 +174,18 @@ module Rubydoom
       weapons_owned[weapon] ? true : false
     end
 
+    # Mark a set of weapons as owned and top up each one's ammo to its
+    # current max. Used by god mode to dump the full arsenal on the
+    # player. Caller filters the list (e.g. to weapons whose sprites
+    # actually exist in the WAD); we just iterate what we're given.
+    def grant_weapons(weapons)
+      weapons.each do |w|
+        weapons_owned[w] = true
+        ammo_type = WEAPON_AMMO[w]
+        ammo[ammo_type] = max_ammo[ammo_type] if ammo_type
+      end
+    end
+
     # Dead = no health. Mirrors vanilla's `playerstate == PST_DEAD`
     # gate on movement and combat actions.
     def dead?
