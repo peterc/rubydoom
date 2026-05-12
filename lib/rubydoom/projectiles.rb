@@ -73,6 +73,27 @@ module Rubydoom
       ["BAL7", "E", 6],
     ].freeze
 
+    # BFG ball stats from MT_BFG (mobjinfo.h). Flight sprite BFS1 (the
+    # floating green ball, two-frame A/B alternation), impact sprite
+    # BFE1 (6-frame fireburst A..F). Direct-hit damage rolls
+    # (rand%8 + 1) * 100 = 100..800. Spray-on-detonation (A_BFGSpray on
+    # the BFE1 C frame, 40 hitscan tracers from the player position)
+    # is intentionally NOT wired here — see TODO.txt; we just let the
+    # death animation play through for now.
+    BFG_SPEED       = 25.0
+    BFG_DAMAGE_D    = 8
+    BFG_DAMAGE_M    = 100
+    BFG_LAUNCH_Z_OFFSET = 32
+    BFG_FLIGHT_FRAMES = ["A", "B"].freeze
+    BFG_DEATH_FRAMES  = [
+      ["BFE1", "A", 8],
+      ["BFE1", "B", 8],
+      ["BFE1", "C", 8],
+      ["BFE1", "D", 8],
+      ["BFE1", "E", 8],
+      ["BFE1", "F", 8],
+    ].freeze
+
     # Cacodemon fireball stats from MT_HEADSHOT (mobjinfo.h). Speed
     # matches the imp's; damage rolls (rand%8 + 1) * 5 = 5..40. Sprite
     # is BAL2 (red-purple ball) with the same A/B alternation and
@@ -119,8 +140,18 @@ module Rubydoom
       :thing, :owner, :z, :vx, :vy, :vz,
       :state, :frame_index, :frame_timer, :anim_phase, :tics_alive,
       :damage, :deathsound,
-      :flight_frames, :death_frames, :splash,
+      :flight_frames, :death_frames, :splash, :spray,
     )
+
+    # BFG A_BFGSpray parameters. 40 tracers in a 90° cone, fired from
+    # the player's position (mo->target in vanilla) at the BFG ball's
+    # flight angle. Each tracer rolls (rand%8 + 1) fifteen times and
+    # sums — 15..120 damage. Range = 16 * 64 = 1024 map units.
+    BFG_SPRAY_TRACERS      = 40
+    BFG_SPRAY_CONE_DEG     = 90.0
+    BFG_SPRAY_RANGE        = 16.0 * 64.0
+    BFG_SPRAY_DAMAGE_ROLLS = 15
+    BFG_SPRAY_FRAME_INDEX  = 2   # BFE1 C — vanilla A_BFGSpray fires here.
 
     def initialize(map, sight, clipper, combat, sound: nil, rng: Random.new)
       @map     = map
@@ -130,9 +161,15 @@ module Rubydoom
       @sound   = sound
       @rng     = rng
       @projs   = []
+      @hitscan = nil
     end
 
     attr_reader :projs
+
+    # Late-bound: Game constructs Projectiles before Hitscan (the rest
+    # of the system already has that order), so the BFG spray hooks
+    # this in once both exist.
+    attr_writer :hitscan
 
     # Spawn an imp fireball from `owner` aimed at `target`. Both need
     # `x`, `y` accessors; target additionally needs a z (player view
@@ -308,6 +345,30 @@ module Rubydoom
       proj
     end
 
+    # Spawn a BFG ball along the player's facing with the given autoaim
+    # slope. Direct-hit damage 100..800; no spray (yet). Flight frames
+    # alternate BFS1 A↔B; impact plays BFE1 A..F.
+    def spawn_bfg_ball(player, slope: 0.0)
+      ang = player.angle * Math::PI / 180.0
+      dx  = Math.cos(ang)
+      dy  = Math.sin(ang)
+      sx  = player.x.to_f
+      sy  = player.y.to_f
+      sz  = (@clipper.floor_at(sx, sy) || 0) + BFG_LAUNCH_Z_OFFSET
+      vx  = BFG_SPEED * dx
+      vy  = BFG_SPEED * dy
+      vz  = BFG_SPEED * slope
+
+      thing = Map::Thing.new(sx, sy, player.angle, 0, 0, false, "BFS1", "A", false, sz)
+      proj  = Proj.new(thing, player, sz, vx, vy, vz,
+                       :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
+                       bfg_direct_damage, :rxplod,
+                       BFG_FLIGHT_FRAMES, BFG_DEATH_FRAMES, false, true)
+      @projs << proj
+      @map.things << thing
+      proj
+    end
+
     # Tick every live projectile.
     def update_tic(player)
       @projs.each { |p| step(p, player) }
@@ -449,6 +510,10 @@ module Rubydoom
       proj.thing.sprite_override = sprite
       proj.thing.frame_override  = frame
       proj.frame_timer = tics
+
+      # Vanilla A_BFGSpray fires from the BFE1 C frame — one fan per
+      # ball, gated by the spray flag so other projectiles ignore it.
+      fire_bfg_spray(proj) if proj.spray && proj.frame_index == BFG_SPRAY_FRAME_INDEX
     end
 
     def advance_flight_anim(proj)
@@ -563,6 +628,40 @@ module Rubydoom
 
     def plasma_direct_damage
       (@rng.rand(PLASMA_DAMAGE_D) + 1) * PLASMA_DAMAGE_M
+    end
+
+    def bfg_direct_damage
+      (@rng.rand(BFG_DAMAGE_D) + 1) * BFG_DAMAGE_M
+    end
+
+    # Vanilla A_BFGSpray. Fires `BFG_SPRAY_TRACERS` rays from the
+    # *player's* position (proj.owner), not the ball's, at angles
+    # sweeping ±45° around the ball's flight angle. Each tracer that
+    # hits a thing deals 15 rolls of (rand%8+1) = 15..120 damage. We
+    # skip the MT_EXTRABFG decorative hit-sprite vanilla spawns at
+    # each victim; that's pure visual.
+    def fire_bfg_spray(proj)
+      return unless @hitscan && @combat
+      owner = proj.owner
+      return unless owner && owner.respond_to?(:angle)
+
+      base = proj.thing.angle.to_f
+      step = BFG_SPRAY_CONE_DEG / BFG_SPRAY_TRACERS
+      shootables = @combat.shootables
+      BFG_SPRAY_TRACERS.times do |i|
+        ang = base - (BFG_SPRAY_CONE_DEG * 0.5) + step * i
+        result = @hitscan.fire(owner,
+                               range:          BFG_SPRAY_RANGE,
+                               shootables:     shootables,
+                               angle_override: ang)
+        next unless result && result[0] == :thing
+        target_thing = result[1]
+        mobj = @combat.mobj_for(target_thing)
+        next unless mobj
+        damage = 0
+        BFG_SPRAY_DAMAGE_ROLLS.times { damage += (@rng.rand(8) + 1) }
+        @combat.damage(mobj, damage, source: owner)
+      end
     end
 
     def owner_z(owner_mobj)

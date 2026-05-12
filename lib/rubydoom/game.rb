@@ -150,6 +150,7 @@ module Rubydoom
                                      sound: @sound, rng: @rng)
       @monster_ai.projectiles = @projectiles
       @hitscan    = Hitscan.new(@map, @clipper, rng: @rng)
+      @projectiles.hitscan = @hitscan
       @weapons    = Weapons.new(hitscan: @hitscan, combat: @combat,
                                 sound: @sound, noise_alert: @noise_alert,
                                 rng: @rng)

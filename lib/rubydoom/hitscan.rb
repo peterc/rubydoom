@@ -42,8 +42,12 @@ module Rubydoom
     # +/- spread (degrees). `shootables` is a list of
     # [thing, radius, height] tuples (Combat#shootables) — pass nil for
     # wall-only checks. The nearest of (wall, any shootable) wins.
-    def fire(player, range: DEFAULT_RANGE, spread_deg: 0.0, shootables: nil)
-      ang = player.angle
+    # `angle_override` (degrees) replaces the player's facing — used by
+    # A_BFGSpray to sweep a 40-tracer fan from the player's position
+    # independent of where the player is now looking.
+    def fire(player, range: DEFAULT_RANGE, spread_deg: 0.0, shootables: nil,
+             angle_override: nil)
+      ang = angle_override || player.angle
       ang += (@rng.rand - 0.5) * 2 * spread_deg unless spread_deg.zero?
       rad = ang * Math::PI / 180.0
       dx  = Math.cos(rad)

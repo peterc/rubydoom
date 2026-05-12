@@ -40,6 +40,7 @@ module Rubydoom
       Info.new(doomednum: 2003, sprite: "LAUN", frame: "A", radius: 20, solid: false),  # rocket launcher
       Info.new(doomednum: 2004, sprite: "PLAS", frame: "A", radius: 20, solid: false),  # plasma rifle
       Info.new(doomednum: 2005, sprite: "CSAW", frame: "A", radius: 20, solid: false),  # chainsaw
+      Info.new(doomednum: 2006, sprite: "BFUG", frame: "A", radius: 20, solid: false),  # BFG9000
 
       # Ammo — pickups.
       Info.new(doomednum: 2007, sprite: "CLIP", frame: "A", radius: 20, solid: false),  # clip

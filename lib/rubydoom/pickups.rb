@@ -26,7 +26,7 @@ module Rubydoom
     # Weapon doomednums get `dswpnup`; everything else (health, ammo,
     # armor, keys, backpack) gets `dsitemup`. Powerups, when we have
     # them, will play `dsgetpow` — none of those types appear here yet.
-    WEAPON_DOOMEDNUMS = [2001, 2002, 2003, 2004, 2005].freeze
+    WEAPON_DOOMEDNUMS = [2001, 2002, 2003, 2004, 2005, 2006].freeze
     POWERUP_DOOMEDNUMS = [2022, 2023, 2024, 2025].freeze
 
     def initialize(map)
@@ -111,6 +111,7 @@ module Rubydoom
       when 2003 then player.pickup_weapon(:rocket)                  # rocket launcher
       when 2004 then player.pickup_weapon(:plasma)                  # plasma rifle
       when 2005 then player.pickup_weapon(:chainsaw)                # chainsaw
+      when 2006 then player.pickup_weapon(:bfg)                     # BFG9000
 
       # ---- Powerups ----
       when 2022 then player.grant_power(:invulnerability)           # invulnerability sphere
@@ -145,7 +146,7 @@ module Rubydoom
       2018, 2019, 2015,                         # armor
       2007, 2048, 2008, 2049, 2046, 2047, 17, 8, # ammo + backpack
       5, 6, 13, 38, 39, 40,                     # keys (cards + skulls)
-      2001, 2002, 2003, 2004, 2005,             # weapons (shotgun/chaingun/rocket/plasma/chainsaw)
+      2001, 2002, 2003, 2004, 2005, 2006,       # weapons (shotgun/chaingun/rocket/plasma/chainsaw/bfg)
       2022, 2023, 2024, 2025,                    # powerups (invuln, berserk, blursphere, radsuit)
     ].freeze
 

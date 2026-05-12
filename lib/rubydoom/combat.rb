@@ -315,7 +315,7 @@ module Rubydoom
     def explode(mobj, source)
       cx = mobj.thing.x.to_f
       cy = mobj.thing.y.to_f
-      @sound&.play_at(:barexp, cx, cy, source, source: mobj) if source
+      @sound&.play_at(:barexp, cx, cy, @player, source: mobj) if @player
       radius_attack(cx, cy, source: source, ignore: mobj)
     end
 

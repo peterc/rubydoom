@@ -11,9 +11,12 @@ end
 task default: :test
 
 namespace :playground do
-  desc "Synthetic arena: 2048-square room with one cacodemon"
+  desc "Synthetic arenas for testing"
   task :caco do
     ruby "-Ilib scripts/playground_caco.rb"
+  end
+  task :bfg do
+    ruby "-Ilib scripts/playground_bfg.rb"
   end
 end
 

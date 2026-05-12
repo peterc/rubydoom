@@ -112,7 +112,22 @@ module Rubydoom
         ],
         ammo: :cell,
       },
-      bfg:    { idle: "BFGGA0", fire_seq: [], ammo: :cell },
+      # Vanilla S_BFG1..4 PSPR sequence — 60 tics total, of which only
+      # the third frame (S_BFG3) actually spawns the projectile. The
+      # first frame plays dsbfg (A_BFGsound) as the warm-up; the
+      # middle frame mimics A_GunFlash (we don't model the muzzle
+      # flash light boost). BFGCELLS = 40 cells per shot.
+      bfg: {
+        idle: "BFGGA0",
+        fire_seq: [
+          ["BFGGA0", 20, :bfg_charge],
+          ["BFGGB0", 10],
+          ["BFGGB0", 10, :fire_bfg],
+          ["BFGGB0", 20],
+        ],
+        ammo: :cell,
+        cost: 40,
+      },
     }.freeze
 
     # Vanilla weapon-key bindings. 1 cycles fist <-> chainsaw if both
@@ -135,6 +150,11 @@ module Rubydoom
       fire_chaingun: :pistol,   # vanilla chaingun uses the pistol sample
       fire_rocket:   :rlaunc,
       fire_plasma:   :plasma,
+      # BFG only plays its dsbfg sample once, at charge-start (vanilla
+      # A_BFGsound on S_BFG1). The actual missile spawn is silent —
+      # nil here keeps :fire_bfg in the hash so emit_noise still wakes
+      # nearby monsters when the ball leaves, without double-playing.
+      fire_bfg:      nil,
       punch:         :punch,
       saw:           :sawful,
     }.freeze
@@ -223,7 +243,7 @@ module Rubydoom
       return false if info[:fire_seq].empty?
       ammo_type = info[:ammo]
       return true if ammo_type.nil?
-      player.ammo[ammo_type] > 0
+      player.ammo[ammo_type] >= (info[:cost] || 1)
     end
 
     def start_fire(player)
@@ -267,9 +287,18 @@ module Rubydoom
       when :fire_chaingun then fire_chaingun(player)
       when :fire_rocket   then fire_rocket(player)
       when :fire_plasma   then fire_plasma(player)
+      when :fire_bfg      then fire_bfg(player)
+      when :bfg_charge    then play_bfg_charge(player)
       when :punch         then punch(player)
       when :saw           then saw(player)
       end
+    end
+
+    # Vanilla A_BFGsound: plays dsbfg without alerting monsters. The
+    # noise alert fires later, on A_FireBFG (the missile-launch tic).
+    def play_bfg_charge(player)
+      return unless @sound
+      @sound.play_at(:bfg, player.x, player.y, player, source: player)
     end
 
     def play_fire_sfx(action, player)
@@ -353,6 +382,18 @@ module Rubydoom
       consume_ammo(player, :cell)
       slope = @hitscan.aim_slope(player, shootables: @combat&.shootables)
       @projectiles.spawn_plasma_bolt(player, slope: slope)
+    end
+
+    # Vanilla A_FireBFG: consumes BFGCELLS=40 cells, spawns one MT_BFG
+    # along the player's facing. Direct-hit damage rolls 100..800
+    # inside Projectiles; A_BFGSpray (the 40-tracer cone-from-player)
+    # is not wired here yet.
+    def fire_bfg(player)
+      return unless @projectiles
+      info = INFO[:bfg]
+      consume_ammo(player, info[:ammo], info[:cost])
+      slope = @hitscan.aim_slope(player, shootables: @combat&.shootables)
+      @projectiles.spawn_bfg_ball(player, slope: slope)
     end
 
     def punch(player)
