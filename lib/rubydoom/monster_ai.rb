@@ -45,11 +45,19 @@ module Rubydoom
       sarg_attack:    :a_sarg_attack,
       bruisr_attack:  :a_bruisr_attack,
       head_attack:    :a_head_attack,
+      skull_attack:   :a_skull_attack,
       boss_death:     :a_boss_death,
       pain:           :a_pain,
       scream:         :a_scream,
       fall:           :a_fall,
+      remove_mobj:    :a_remove_mobj,
     }.freeze
+
+    # Lost soul charge velocity. Vanilla SKULLSPEED is 20 fixed-point
+    # units per tic. Faster than every projectile except the rocket; the
+    # soul has to be moving fast enough to be threatening before the
+    # player can outrun it on flat ground.
+    SKULL_DIVE_SPEED = 20.0
 
     def initialize(map, combat, sight, movement, sound: nil,
                    noise_alert: nil, projectiles: nil, rng: Random.new)
@@ -449,6 +457,52 @@ module Rubydoom
         return
       end
       @projectiles&.spawn_caco_ball(mobj, player, listener: player)
+    end
+
+    # Lost soul: launch the MF_SKULLFLY dive. Vanilla A_SkullAttack
+    # plays the soul's attack sound, snaps angle to the target, sets
+    # the per-tic velocity toward the target's center of mass, and
+    # flags the mobj as flying. The actual collision + bash damage
+    # runs inside Combat#advance_skullfly each tic until the soul hits
+    # something or bashes a wall.
+    #
+    # Initial z is the soul's spawn-floor + body-center; aim z is the
+    # target's chest. Since we don't model z per-mobj outside of the
+    # dive, the soul launches from chest height of its current sector
+    # floor — same approximation we use for cacodemons and projectiles.
+    def a_skull_attack(mobj, player)
+      return unless mobj.target
+      play_attack_sound(mobj, player)
+      a_face_target(mobj, player)
+
+      tx, ty = target_xy(mobj.target)
+      dx = tx - mobj.thing.x
+      dy = ty - mobj.thing.y
+
+      floor = @clipper.floor_at(mobj.thing.x, mobj.thing.y) || 0
+      sz    = floor + mobj.info.height / 2.0
+      tz    = player_eye(mobj.target)
+
+      rad = mobj.thing.angle * Math::PI / 180.0
+      mobj.vx = SKULL_DIVE_SPEED * Math.cos(rad)
+      mobj.vy = SKULL_DIVE_SPEED * Math.sin(rad)
+
+      dist = Math.hypot(dx, dy)
+      time_to_target = dist / SKULL_DIVE_SPEED
+      time_to_target = 1.0 if time_to_target < 1.0
+      mobj.vz = (tz - sz) / time_to_target
+
+      mobj.skull_z   = sz
+      mobj.skullfly  = true
+      mobj.thing.z_override = sz
+    end
+
+    # Terminal-frame disappear action: lost souls leave no corpse.
+    # The K death-frame holds for 6 tics via skull_die6; on entry to
+    # skull_remove we flip thing.removed so the renderer drops the
+    # sprite. State stays :dead so Combat won't tick the mobj again.
+    def a_remove_mobj(mobj, _player)
+      mobj.thing.removed = true
     end
 
     # E1M8 boss-arena gate. Runs from the terminal Baron death frame

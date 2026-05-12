@@ -121,6 +121,26 @@ module Rubydoom
         active_sound: :dmact,
         flags: FLAG_COUNTKILL,
       ),
+      # Lost Soul (SKULL) — health 100, 148 instances across E2+E3.
+      # No projectile: A_SkullAttack flings the mobj itself toward the
+      # player at SKULLSPEED = 20 mu/tic (the MF_SKULLFLY dive). On
+      # collision with a thing the dive deals (rand%8 + 1) * 3 = 3..24
+      # bash damage; on collision with a wall the dive just stops. Pain
+      # chance 256 means every survived hit triggers pain. No see_sound
+      # in vanilla (sfx_None) — lost souls wake silently.
+      Info.new(
+        doomednum: 3006, health: 100, radius: 16, height: 56,
+        speed: 8, pain_chance: 256, reaction_time: 8,
+        spawn_state:   :skull_stnd,
+        see_state:     :skull_run1,
+        pain_state:    :skull_pain,
+        missile_state: :skull_atk1,
+        death_state:   :skull_die1,
+        see_sound:    nil,        pain_sound:  :dmpain,
+        death_sound:  :firxpl,    attack_sound: :sklatk,
+        active_sound: :dmact,
+        flags: FLAG_COUNTKILL,
+      ),
       # Baron of Hell (BOSS) — health 1000, E1M8 boss. Melee claw or
       # spits an MT_BRUISERSHOT fireball depending on range. Same trick
       # as the imp: melee_state == missile_state, so a_chase enters

@@ -18,6 +18,9 @@ namespace :playground do
   task :bfg do
     ruby "-Ilib scripts/playground_bfg.rb"
   end
+  task :skull do
+    ruby "-Ilib scripts/playground_skull.rb"
+  end
 end
 
 namespace :profile do

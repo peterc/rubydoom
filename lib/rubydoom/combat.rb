@@ -45,9 +45,16 @@ module Rubydoom
     #   move_dir    — 0..7 cardinal/diagonal index, or 8 (no direction)
     #   move_count  — tics-since-last-newchasedir; vanilla rerolls at 0
     #   reaction_time — tics before A_Look will react (set on damage too)
+    # Lost soul dive fields (`skullfly`, `vx`, `vy`, `vz`, `skull_z`) sit
+    # idle for every other mobj kind. When a lost soul fires
+    # A_SkullAttack, MonsterAI sets `skullfly = true` and assigns the
+    # per-tic velocity; Combat#advance_skullfly then runs the dive on
+    # top of the normal state machine until the soul collides with
+    # something (player, monster, wall) and the bash resolves.
     Mobj = Struct.new(
       :thing, :health, :state, :frame_index, :frame_timer, :kind,
       :info, :state_key, :target, :move_dir, :move_count, :reaction_time,
+      :skullfly, :vx, :vy, :vz, :skull_z,
     )
 
     # No-direction sentinel matching vanilla DI_NODIR.
@@ -83,6 +90,12 @@ module Rubydoom
     # damage / state transitions, and Combat dispatches state-action
     # symbols to the AI. Wiring is two-way and registered post-init.
     attr_accessor :ai
+
+    # Late-bound: Game sets the clipper after Combat init so the
+    # skullfly motion step can ask "is this destination legal?". When
+    # nil (older test setups), the dive just commits every step without
+    # wall checks.
+    attr_accessor :clipper
 
     # [thing, radius, height] for each live mobj. The third element is
     # needed by Hitscan's vertical aim — a shot has a slope and the
@@ -254,9 +267,115 @@ module Rubydoom
       # Reaction-time countdown is shared across alive states; A_Look
       # checks it before acquiring a target.
       mobj.reaction_time -= 1 if mobj.reaction_time && mobj.reaction_time > 0
+      # Lost soul dive runs every tic, independent of the state-machine
+      # timer that animates the dive sprite. advance_skullfly may end
+      # the dive and transition to spawn_state — in that case skip the
+      # frame-timer advance so we don't immediately step off the fresh
+      # state's first frame.
+      if mobj.skullfly
+        was_flying = true
+        advance_skullfly(mobj)
+        return if !mobj.skullfly && was_flying
+      end
       mobj.frame_timer -= 1
       return if mobj.frame_timer > 0
       advance_monster_state(mobj)
+    end
+
+    # Lost soul bash damage: vanilla A_SkullAttack uses
+    # `(P_Random() % 8 + 1) * mobj->info->damage` with damage = 3,
+    # i.e. 3..24. Applied to the first thing the dive overlaps.
+    SKULL_DAMAGE_DICE = 8
+    SKULL_DAMAGE_MULT = 3
+
+    # Per-tic dive step. The skullfly motion runs in addition to the
+    # state machine — the soul keeps cycling SKUL C/D while moving.
+    # End-of-dive conditions, in priority order:
+    #
+    #   1. Body overlap with the player → damage player, end dive.
+    #   2. Body overlap with another live mobj (skip self) → damage
+    #      that mobj via #damage (so pain/death/infighting all fire),
+    #      end dive.
+    #   3. Destination position is invalid (wall, closed door, step too
+    #      tall) → end dive, no damage. Vanilla's "skull bashes against
+    #      the wall, gets stunned" behavior.
+    #   4. New z punched through the sector floor / ceiling → end dive.
+    def advance_skullfly(mobj)
+      nx = mobj.thing.x + (mobj.vx || 0.0)
+      ny = mobj.thing.y + (mobj.vy || 0.0)
+      nz = (mobj.skull_z || 0.0) + (mobj.vz || 0.0)
+
+      if @player && @player.health > 0 && skull_overlaps_player?(nx, ny, mobj.info.radius)
+        damage_amount = skull_bash_damage
+        @player.take_damage(damage_amount)
+        end_skullfly(mobj)
+        return
+      end
+
+      victim = skull_overlaps_other_mobj(mobj, nx, ny)
+      if victim
+        damage(victim, skull_bash_damage, source: mobj)
+        end_skullfly(mobj)
+        return
+      end
+
+      if @clipper
+        current_floor = @clipper.floor_at(mobj.thing.x, mobj.thing.y) || 0
+        unless @clipper.position_valid?(
+          nx, ny, current_floor, mobj.info.radius,
+          start_x: mobj.thing.x, start_y: mobj.thing.y,
+          allow_dropoff: true,
+        )
+          end_skullfly(mobj)
+          return
+        end
+        sector = @clipper.sector_at(nx, ny)
+        if sector && (nz <= sector.floor_height || nz + mobj.info.height >= sector.ceiling_height)
+          end_skullfly(mobj)
+          return
+        end
+      end
+
+      mobj.thing.x = nx
+      mobj.thing.y = ny
+      mobj.skull_z = nz
+      mobj.thing.z_override = nz
+    end
+
+    # End the dive: clear flying flag, zero velocity, drop z_override so
+    # the renderer sits the soul back on the floor, and (if still alive)
+    # reset to the spawn state — vanilla's `P_SetMobjState(actor,
+    # info->spawnstate)` after MF_SKULLFLY clears.
+    def end_skullfly(mobj)
+      mobj.skullfly = false
+      mobj.vx = mobj.vy = mobj.vz = 0.0
+      mobj.thing.z_override = nil
+      return unless mobj.state == :alive
+      enter_state(mobj, mobj.info.spawn_state)
+    end
+
+    def skull_bash_damage
+      (@rng.rand(SKULL_DAMAGE_DICE) + 1) * SKULL_DAMAGE_MULT
+    end
+
+    def skull_overlaps_player?(nx, ny, skr)
+      return false unless @player
+      reach = skr + Clipper::PLAYER_RADIUS
+      (nx - @player.x).abs < reach && (ny - @player.y).abs < reach
+    end
+
+    def skull_overlaps_other_mobj(mobj, nx, ny)
+      r = mobj.info.radius
+      @mobjs.each do |other|
+        next if other.equal?(mobj) || other.state != :alive
+        oradius = (other.info ? other.info.radius : 0).to_f
+        next if oradius.zero?
+        reach = r + oradius
+        next if (nx - other.thing.x).abs >= reach
+        next if (ny - other.thing.y).abs >= reach
+        return other
+      end
+      nil
     end
 
     def advance_monster_state(mobj)

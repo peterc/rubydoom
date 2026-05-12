@@ -140,6 +140,7 @@ module Rubydoom
       @switches.listener = @player
       @plats.listener    = @player
       @combat     = Combat.new(@map, sound: @sound, rng: @rng)
+      @combat.clipper = @clipper
       @sight      = Sight.new(@map, @clipper)
       @monster_movement = MonsterMovement.new(@map, @clipper, @combat, rng: @rng)
       @monster_ai = MonsterAI.new(@map, @combat, @sight, @monster_movement,

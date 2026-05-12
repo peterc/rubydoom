@@ -181,6 +181,38 @@ module Rubydoom
       boss_die5:  s("BOSS", "M", 8,  nil,    :boss_die6),
       boss_die6:  s("BOSS", "N", 8,  nil,    :boss_die7),
       boss_die7:  s("BOSS", "O", nil,:boss_death, nil),
+
+      # --- Lost Soul (SKULL) ---
+      # Two-frame stand + two-frame run (lost souls hover, no leg
+      # animation). Attack sequence: SKUL C (face), SKUL D
+      # (a_skull_attack — sets the dive in motion), then SKUL C/D
+      # alternation while the soul flies. The atk3/atk4 loop is the
+      # in-flight body animation; the actual collision physics runs
+      # outside the state machine (see Combat#advance_skullfly).
+      # Death is SKUL F..K; vanilla despawns the corpse, so the
+      # terminal entry hits :remove_mobj after the K frame holds for
+      # 6 tics, clearing thing.removed.
+      skull_stnd:    s("SKUL", "A", 10, :look,         :skull_stnd2),
+      skull_stnd2:   s("SKUL", "B", 10, :look,         :skull_stnd),
+      skull_run1:    s("SKUL", "A", 6,  :chase,        :skull_run2),
+      skull_run2:    s("SKUL", "B", 6,  :chase,        :skull_run1),
+      skull_atk1:    s("SKUL", "C", 10, :face_target,  :skull_atk2),
+      skull_atk2:    s("SKUL", "D", 4,  :skull_attack, :skull_atk3),
+      skull_atk3:    s("SKUL", "C", 4,  nil,           :skull_atk4),
+      skull_atk4:    s("SKUL", "D", 4,  nil,           :skull_atk3),
+      skull_pain:    s("SKUL", "E", 3,  nil,           :skull_pain2),
+      skull_pain2:   s("SKUL", "E", 3,  :pain,         :skull_run1),
+      skull_die1:    s("SKUL", "F", 6,  nil,           :skull_die2),
+      skull_die2:    s("SKUL", "G", 6,  :scream,       :skull_die3),
+      skull_die3:    s("SKUL", "H", 6,  nil,           :skull_die4),
+      skull_die4:    s("SKUL", "I", 6,  :fall,         :skull_die5),
+      skull_die5:    s("SKUL", "J", 6,  nil,           :skull_die6),
+      skull_die6:    s("SKUL", "K", 6,  nil,           :skull_remove),
+      # Terminal action-only state. Sprite/frame are nil so
+      # apply_monster_frame leaves the K frame in place visually;
+      # tics=nil flags this as terminal so :remove_mobj fires on entry
+      # and the mobj's Thing is dropped from the renderer.
+      skull_remove:  s(nil,    nil, nil, :remove_mobj,  nil),
     }.freeze
 
     def self.[](key)
