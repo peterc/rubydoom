@@ -84,7 +84,7 @@ module Rubydoom
 
     def lump_name(player)
       return DEAD_LUMP if player.health <= 0
-      return GOD_LUMP  if player.god_mode
+      return GOD_LUMP  if player.god_mode || player.has_power?(:invulnerability)
       pain = pain_offset(player.health)
       return "STFOUCH#{pain}" if @ouch_left     > 0
       return "STFEVL#{pain}"  if @evilgrin_left > 0

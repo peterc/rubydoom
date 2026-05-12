@@ -255,6 +255,10 @@ module Rubydoom
     def take_damage(amount)
       return if amount <= 0
       return if god_mode
+      # Invulnerability sphere — vanilla P_DamageMobj bails before any
+      # health/armor mutation, and (unlike god mode) doesn't even paint
+      # the red screen flash since damage_count never bumps.
+      return if has_power?(:invulnerability)
       raw = amount
       if armor.positive? && armor_class
         frac  = (armor_class == :blue) ? 0.5 : (1.0 / 3.0)
@@ -317,6 +321,15 @@ module Rubydoom
       bonus = (bonus_count + 7) >> 3
       bonus = 4 if bonus > 4
       return [215, 186, 69, bonus * 12] if bonus > 0
+
+      # Invulnerability: vanilla flips to INVERSEPAL (all-white colormap),
+      # which we approximate with a strong white wash. During the final
+      # POWER_FADE_TICS the overlay blinks off on odd tics, mirroring
+      # vanilla's `& 8` flicker that warns the player it's running out.
+      if powers[:invulnerability] > 0
+        return nil if powers[:invulnerability] < POWER_FADE_TICS && powers[:invulnerability].odd?
+        return [255, 255, 255, 100]
+      end
 
       # Radiation-suit green. Vanilla uses STARTPOISONPALS to bias the
       # whole palette green; we approximate with a translucent overlay.
