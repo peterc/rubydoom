@@ -2,7 +2,7 @@
 
 ![rubydoom running E1M1](docs/screenshot.png)
 
-A pure-Ruby DOOM ~~port~~ clone (it's complicated) for benchmarking purposes. Runs headlessly or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/). While Gosu is a non-Ruby third party dependency, the *engine* (both in terms of graphics and simulation) is "pure Ruby" and headlessly it operates as such.
+A pure-Ruby DOOM ~~port~~ "clone" (it's complicated) for benchmarking purposes. Runs headlessly or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/). While Gosu is a non-Ruby third party dependency, the *engine* (both in terms of graphics and simulation) is "pure Ruby" and headlessly it operates as such.
 
 The point of the project is not to be a DOOM implementation to *play*, but to be a **realistic, large workload for benchmarking Ruby implementations and their JIT compilers**.
 
@@ -167,6 +167,12 @@ While I've played Doom since it first came out and have a good technical underst
 While the Doom engine was open sourced back in the 90s and is certainly in the training material for LLMs, this implementation is not a direct port from that source. Instead, I started with analyzing the WAD file, and figuring out how far we could get based solely on our collective knowledge of the game and the WAD assets. It wasn't until it came to implementing the sprites and entity behaviors (both of which rely on things hard coded into the game, rather than the WAD) that I caved in and gave Claude direct access to the source. Given that, I felt re-using the original GPL2 licence here was appropriate.
 
 Claude and Codex did not do a perfect job on their own, however, and after profiling I noticed a lot of things that could be redone, and set them out on that, which shaved a good 50% of time off rendering a tic. So we all got there as a group effort, but was the majority of the grunt work done by AI? Yes! :-)
+
+## Similar projects
+
+* [khasinski/doom](https://github.com/khasinski/doom) by Chris Hasinski is a *"faithful port of the DOOM (1993) engine to pure Ruby."* It, too, uses Gosu.
+* [GORE](https://github.com/AndreRenaud/Gore) and [cznic/doomgeneric](https://gitlab.com/cznic/doomgeneric/) are Go ports of Doom which use an interesting process of directly converting C code to Go.
+* Three.js creator mrdoob is [working on a Three.js port of Doom](https://x.com/mrdoob/status/2054075364432031991) which uses a rather different rendering approach.
 
 ## License
 
