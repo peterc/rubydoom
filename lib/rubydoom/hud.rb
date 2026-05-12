@@ -16,6 +16,22 @@ module Rubydoom
     ARMS_X             = 104
     ARMS_Y             = STATUS_BAR_Y
 
+    # Arms-panel digit slots. Vanilla st_stuff.c lays out a 3x2 grid
+    # above STARMS for weaponowned[1..6] = pistol, shotgun, chaingun,
+    # rocket, plasma, BFG. Owned digits drawn in yellow (STYSNUM),
+    # unowned in grey (STGNUM). Fist and chainsaw share the "1" key
+    # and don't get a slot here.
+    ARMS_DIGIT_SLOTS = [
+      [2, :pistol,   111, 172],
+      [3, :shotgun,  123, 172],
+      [4, :chaingun, 135, 172],
+      [5, :rocket,   111, 182],
+      [6, :plasma,   123, 182],
+      [7, :bfg,      135, 182],
+    ].freeze
+    ARMS_DIGIT_OWNED_PREFIX   = "STYSNUM"
+    ARMS_DIGIT_UNOWNED_PREFIX = "STGNUM"
+
     FACE_X             = 143
     FACE_Y             = 168
 
@@ -101,6 +117,7 @@ module Rubydoom
       # them, but STFST00 has (-5,-2) and won't sit centered without it.
       @images["STBAR"].draw_anchored(0, STATUS_BAR_Y, Z_STATUS_BAR_BG)
       @images["STARMS"].draw_anchored(ARMS_X, ARMS_Y, Z_STATUS_BAR_FG)
+      draw_arms_panel(player)
 
       # Big AMMO is the current weapon's primary ammo count; melee
       # weapons (fist / chainsaw) have no ammo type so we leave the
@@ -124,6 +141,15 @@ module Rubydoom
         lump_idx = slot[:skull] ? i + 3 : i
         y = KEY_BOX_TOP_Y + i * KEY_BOX_DY
         @images["STKEYS#{lump_idx}"].draw_anchored(KEY_BOX_X, y, Z_STATUS_BAR_FG)
+      end
+    end
+
+    def draw_arms_panel(player)
+      ARMS_DIGIT_SLOTS.each do |digit, weapon, x, y|
+        prefix = player.weapons_owned[weapon] ? ARMS_DIGIT_OWNED_PREFIX : ARMS_DIGIT_UNOWNED_PREFIX
+        glyph  = @images["#{prefix}#{digit}"]
+        next unless glyph     # plasma/BFG sprites or glyphs may be absent
+        glyph.draw_anchored(x, y, Z_STATUS_BAR_FG)
       end
     end
 
