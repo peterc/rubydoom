@@ -100,7 +100,18 @@ module Rubydoom
         ],
         ammo: :rocket,
       },
-      plasma: { idle: "PLSGA0", fire_seq: [], ammo: :cell },
+      plasma: {
+        # Vanilla S_PLASMA1: PLSG B 3 tics, A_FirePlasma. The 20-tic
+        # S_PLASMA2 frame is collapsed — A_ReFire would short-circuit
+        # it when the button is held anyway, giving a 3-tic fire cycle
+        # (~12 Hz). Sprites missing from shareware doom1.wad so this
+        # only fires on commercial WADs.
+        idle: "PLSGA0",
+        fire_seq: [
+          ["PLSGB0", 3, :fire_plasma],
+        ],
+        ammo: :cell,
+      },
       bfg:    { idle: "BFGGA0", fire_seq: [], ammo: :cell },
     }.freeze
 
@@ -123,6 +134,7 @@ module Rubydoom
       fire_shotgun:  :shotgn,
       fire_chaingun: :pistol,   # vanilla chaingun uses the pistol sample
       fire_rocket:   :rlaunc,
+      fire_plasma:   :plasma,
       punch:         :punch,
       saw:           :sawful,
     }.freeze
@@ -254,6 +266,7 @@ module Rubydoom
       when :fire_shotgun  then fire_shotgun(player)
       when :fire_chaingun then fire_chaingun(player)
       when :fire_rocket   then fire_rocket(player)
+      when :fire_plasma   then fire_plasma(player)
       when :punch         then punch(player)
       when :saw           then saw(player)
       end
@@ -329,6 +342,13 @@ module Rubydoom
       consume_ammo(player, :rocket)
       slope = @hitscan.aim_slope(player, shootables: @combat&.shootables)
       @projectiles.spawn_rocket(player, slope: slope)
+    end
+
+    def fire_plasma(player)
+      return unless @projectiles
+      consume_ammo(player, :cell)
+      slope = @hitscan.aim_slope(player, shootables: @combat&.shootables)
+      @projectiles.spawn_plasma_bolt(player, slope: slope)
     end
 
     def punch(player)

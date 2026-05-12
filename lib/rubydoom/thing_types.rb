@@ -36,14 +36,17 @@ module Rubydoom
       Info.new(doomednum: 2001, sprite: "SHOT", frame: "A", radius: 20, solid: false),  # shotgun
       Info.new(doomednum: 2002, sprite: "MGUN", frame: "A", radius: 20, solid: false),  # chaingun
       Info.new(doomednum: 2003, sprite: "LAUN", frame: "A", radius: 20, solid: false),  # rocket launcher
+      Info.new(doomednum: 2004, sprite: "PLAS", frame: "A", radius: 20, solid: false),  # plasma rifle
       Info.new(doomednum: 2005, sprite: "CSAW", frame: "A", radius: 20, solid: false),  # chainsaw
 
       # Ammo — pickups.
       Info.new(doomednum: 2007, sprite: "CLIP", frame: "A", radius: 20, solid: false),  # clip
       Info.new(doomednum: 2008, sprite: "SHEL", frame: "A", radius: 20, solid: false),  # 4 shells
       Info.new(doomednum: 2046, sprite: "BROK", frame: "A", radius: 20, solid: false),  # box of rockets
+      Info.new(doomednum: 2047, sprite: "CELL", frame: "A", radius: 20, solid: false),  # cell
       Info.new(doomednum: 2048, sprite: "AMMO", frame: "A", radius: 20, solid: false),  # box of bullets
       Info.new(doomednum: 2049, sprite: "SBOX", frame: "A", radius: 20, solid: false),  # box of shells
+      Info.new(doomednum:   17, sprite: "CELP", frame: "A", radius: 20, solid: false),  # cell pack
       Info.new(doomednum:    8, sprite: "BPAK", frame: "A", radius: 20, solid: false),  # backpack
 
       # Health & armor — pickups.

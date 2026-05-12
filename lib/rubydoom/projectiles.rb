@@ -58,6 +58,20 @@ module Rubydoom
       ["MISL", "D", 4],
     ].freeze
 
+    # Plasma bolt stats from MT_PLASMA (mobjinfo.h).
+    PLASMA_SPEED          = 25.0
+    PLASMA_DAMAGE_D       = 8       # direct hit = (rand%8 + 1) * MULT = 5..40
+    PLASMA_DAMAGE_M       = 5
+    PLASMA_LAUNCH_Z_OFFSET = 32
+    PLASMA_FLIGHT_FRAMES   = ["A", "B"].freeze
+    PLASMA_DEATH_FRAMES    = [
+      ["PLSE", "A", 4],
+      ["PLSE", "B", 4],
+      ["PLSE", "C", 4],
+      ["PLSE", "D", 4],
+      ["PLSE", "E", 4],
+    ].freeze
+
     # Hard cap so a projectile that doesn't hit anything (open sky-ish
     # geometry, or a target out of range) doesn't live forever. 175 tics
     # ≈ 5 seconds, which is plenty given the fireball's 10 mu/tic speed
@@ -148,6 +162,32 @@ module Rubydoom
       @projs << proj
       @map.things << thing
       @sound&.play_at(:rlaunc, sx, sy, player, source: player)
+      proj
+    end
+
+    # Spawn a plasma bolt along the player's facing, autoaim slope
+    # applied. Direct-hit damage 5..40, no splash — plasma is rapid-
+    # fire single-target. Flight frames alternate PLSS A↔B; impact
+    # plays the PLSE A..E animation.
+    def spawn_plasma_bolt(player, slope: 0.0)
+      ang = player.angle * Math::PI / 180.0
+      dx  = Math.cos(ang)
+      dy  = Math.sin(ang)
+      sx  = player.x.to_f
+      sy  = player.y.to_f
+      sz  = (@clipper.floor_at(sx, sy) || 0) + PLASMA_LAUNCH_Z_OFFSET
+      vx  = PLASMA_SPEED * dx
+      vy  = PLASMA_SPEED * dy
+      vz  = PLASMA_SPEED * slope
+
+      thing = Map::Thing.new(sx, sy, player.angle, 0, 0, false, "PLSS", "A", false, sz)
+      proj  = Proj.new(thing, player, sz, vx, vy, vz,
+                       :flying, 0, FLIGHT_FRAME_TICS, 0, 0,
+                       plasma_direct_damage, :firxpl,
+                       PLASMA_FLIGHT_FRAMES, PLASMA_DEATH_FRAMES, false)
+      @projs << proj
+      @map.things << thing
+      @sound&.play_at(:plasma, sx, sy, player, source: player)
       proj
     end
 
@@ -393,6 +433,10 @@ module Rubydoom
 
     def rocket_direct_damage
       (@rng.rand(ROCKET_DAMAGE_D) + 1) * ROCKET_DAMAGE_M
+    end
+
+    def plasma_direct_damage
+      (@rng.rand(PLASMA_DAMAGE_D) + 1) * PLASMA_DAMAGE_M
     end
 
     def owner_z(owner_mobj)

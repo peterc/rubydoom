@@ -2,33 +2,34 @@
 
 ![rubydoom running E1M1](docs/screenshot.png)
 
-A pure-Ruby DOOM ~~port~~ "clone" (it's complicated) for benchmarking purposes. Runs headlessly or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/). While Gosu is a non-Ruby third party dependency, the *engine* (both in terms of graphics and simulation) is "pure Ruby" and headlessly it operates as such.
+A pure-Ruby DOOM ~~port~~ "clone". Runs headlessly (for benchmarking) or in a playable graphical form (with sound) using [Gosu](https://www.libgosu.org/).
 
-The point of the project is not to be a DOOM implementation to *play*, but to be a **realistic, large workload for benchmarking Ruby implementations and their JIT compilers**.
-
-> [!NOTE]
-> The shareware version of DOOM1.WAD is needed but not included in this project due to licensing concerns. It is legal to download, however, and [you can get it here.](https://doomwiki.org/wiki/DOOM1.WAD)
+rubydoom is designed to be a **realistic, large workload for benchmarking Ruby implementations and their JIT compilers**, but that also happens to be playable, as you prefer. The underlying engine is "pure Ruby" with Gosu as a third-party native dependency for hooking up graphics, controls, etc.
 
 > [!IMPORTANT]
 > There is an [AI disclosure](#ai-disclosure) later in this document.
 
 ## Quick start in game mode
 
-You need Ruby (tested on 4.0.2 and 3.4.7 - or headlessly only on TruffleRuby 34), `bundle`, and, as mentioned above, a `DOOM1.WAD` (`doom1.wad` is also accepted as a filename) in the `wads/` directory (the project root is also searched for backwards compatibility).
+To run it as a visual, playable experience, you need CRuby 3.4.7+  and, at minimum, a full 'IWAD' `WAD` file, like the shareware `DOOM1.WAD` or full `DOOM.WAD` which came with the original game.
+
+> [!NOTE]
+> The shareware version of DOOM1.WAD is needed but not included in this project due to licensing concerns. It is legal to download, however, and [you can get it here.](https://doomwiki.org/wiki/DOOM1.WAD)
 
 ```sh
 bundle install
 bin/rubydoom                            # play E1M1
-bin/rubydoom --map E1M3 wads/doom1.wad  # play a different map / wad
+bin/rubydoom --map E1M3 wads/doom.wad   # play a different map / wad
 ```
 
 Default controls: WASD or arrow keys to move, mouse to look (click in the window to capture the cursor, Esc to release), left-Ctrl or left-mouse to fire, Space to use, 1–7 to switch weapons, Tab toggles the automap, P prints the current world position to stdout for debugging purposes. Arrow keys can be used to rotate left/right, if you want to avoid using the mouse entirely.
 
 > [!TIP]
-> Pressing "G" while in game enables GOD MODE if you suck like me!! 😂 As well as fixing your health at 100%, it also gives you all the weapons for a fun test.
-
+> Pressing "G" while in game enables GOD MODE if you suck like me!! 😂 As well as fixing your health at 100%, it also gives you all the weapons for a fun test. Note that the plasma rifle and BFG are NOT in the 'shareware' WAD, but you do get the rocket launcher at least.
 
 ## Benchmarking
+
+Since the underlying engine of the game is in pure Ruby, it can be run on other implementations like TruffleRuby.
 
 The simulation can be driven deterministically: seed the RNG, record a demo, then replay it under different configurations. Output is identical given the same seed.
 

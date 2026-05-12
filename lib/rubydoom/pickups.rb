@@ -26,7 +26,7 @@ module Rubydoom
     # Weapon doomednums get `dswpnup`; everything else (health, ammo,
     # armor, keys, backpack) gets `dsitemup`. Powerups, when we have
     # them, will play `dsgetpow` — none of those types appear here yet.
-    WEAPON_DOOMEDNUMS = [2001, 2002, 2003, 2005].freeze
+    WEAPON_DOOMEDNUMS = [2001, 2002, 2003, 2004, 2005].freeze
 
     def initialize(map)
       @map     = map
@@ -92,6 +92,8 @@ module Rubydoom
       when 2008 then player.add_ammo(:shell,   4) > 0               # 4 shells
       when 2049 then player.add_ammo(:shell,  20) > 0               # box of shells
       when 2046 then player.add_ammo(:rocket,  5) > 0               # box of rockets
+      when 2047 then player.add_ammo(:cell,   20) > 0               # cell
+      when   17 then player.add_ammo(:cell,  100) > 0               # cell pack
       when    8 then player.pickup_backpack                         # backpack
 
       # ---- Keys ----
@@ -106,6 +108,7 @@ module Rubydoom
       when 2001 then player.pickup_weapon(:shotgun)                 # shotgun
       when 2002 then player.pickup_weapon(:chaingun)                # chaingun
       when 2003 then player.pickup_weapon(:rocket)                  # rocket launcher
+      when 2004 then player.pickup_weapon(:plasma)                  # plasma rifle
       when 2005 then player.pickup_weapon(:chainsaw)                # chainsaw
       else
         false
@@ -124,11 +127,11 @@ module Rubydoom
     end
 
     PICKUP_DOOMEDNUMS = [
-      2011, 2012, 2013, 2014,             # health
-      2018, 2019, 2015,                   # armor
-      2007, 2048, 2008, 2049, 2046, 8,    # ammo + backpack
-      5, 6, 13, 38, 39, 40,               # keys (cards + skulls)
-      2001, 2002, 2003, 2005,             # weapons (shotgun/chaingun/rocket/chainsaw)
+      2011, 2012, 2013, 2014,                   # health
+      2018, 2019, 2015,                         # armor
+      2007, 2048, 2008, 2049, 2046, 2047, 17, 8, # ammo + backpack
+      5, 6, 13, 38, 39, 40,                     # keys (cards + skulls)
+      2001, 2002, 2003, 2004, 2005,             # weapons (shotgun/chaingun/rocket/plasma/chainsaw)
     ].freeze
   end
 end
