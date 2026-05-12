@@ -10,6 +10,13 @@ end
 
 task default: :test
 
+namespace :playground do
+  desc "Synthetic arena: 2048-square room with one cacodemon"
+  task :caco do
+    ruby "-Ilib scripts/playground_caco.rb"
+  end
+end
+
 namespace :profile do
   desc "Run rubydoom under stackprof (MAP=E1M1 WAD=doom1.wad OUT=tmp/rubydoom-stackprof.dump)"
   task :game do

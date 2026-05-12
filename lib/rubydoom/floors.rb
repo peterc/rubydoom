@@ -47,6 +47,7 @@ module Rubydoom
     S1_RAISE_NEXT_CHGTX      = 20
     S1_RAISE_TO_NEXT         = 18
     S1_LOWER_TO_LOWEST       = 23
+    S1_LOWER_TO_HIGHEST      = 102
     SR_LOWER_FAST            = 70
     WR_LOWER_TO_LOWEST       = 82
 
@@ -87,6 +88,8 @@ module Rubydoom
         activate_raise_to_next(linedef.sector_tag)
       when S1_LOWER_TO_LOWEST
         activate_lower_to_lowest(linedef.sector_tag)
+      when S1_LOWER_TO_HIGHEST
+        activate_lower_to_highest(linedef.sector_tag)
       when SR_LOWER_FAST
         activate_lower_fast(linedef.sector_tag)
       else
@@ -177,6 +180,19 @@ module Rubydoom
         next if @active[s.object_id]
         dest = lowest_neighbor_floor(s)
         next if dest.nil? || dest >= s.floor_height
+        @active[s.object_id] = Mover.new(s, dest, FLOOR_SPEED_NORMAL, :down, false)
+        fired = true
+      end
+      fired
+    end
+
+    def activate_lower_to_highest(tag)
+      fired = false
+      @map.sectors.each do |s|
+        next unless s.tag == tag
+        next if @active[s.object_id]
+        dest = highest_neighbor_floor(s)
+        next if dest >= s.floor_height
         @active[s.object_id] = Mover.new(s, dest, FLOOR_SPEED_NORMAL, :down, false)
         fired = true
       end

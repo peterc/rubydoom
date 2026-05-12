@@ -32,11 +32,13 @@ module Rubydoom
     S1_EXIT_LEVEL        = 11
     S1_EXIT_SECRET       = 51
     S1_DOOR_OPEN_STAY    = 103
+    S1_DOOR_OPEN_CLOSE   = 29
     SR_DOOR_OPEN_CLOSE   = 63
     SR_LIFT_LOWER_RAISE  = 62
     S1_FLOOR_RAISE_NEXT  = 20
     S1_FLOOR_RAISE_NEXT_PLAIN = 18
     S1_FLOOR_LOWER_LOWEST = 23
+    S1_FLOOR_LOWER_HIGHEST = 102
     SR_FLOOR_LOWER_FAST  = 70
     S1_DONUT             = 9
     GR_DOOR_OPEN_STAY    = 46
@@ -51,8 +53,9 @@ module Rubydoom
     # leave the special intact; we still swap the texture so the
     # player gets the click animation.
     ONCE_ONLY = [
-      S1_EXIT_LEVEL, S1_EXIT_SECRET, S1_DOOR_OPEN_STAY, S1_FLOOR_RAISE_NEXT,
-      S1_FLOOR_RAISE_NEXT_PLAIN, S1_FLOOR_LOWER_LOWEST, S1_DONUT,
+      S1_EXIT_LEVEL, S1_EXIT_SECRET, S1_DOOR_OPEN_STAY, S1_DOOR_OPEN_CLOSE,
+      S1_FLOOR_RAISE_NEXT, S1_FLOOR_RAISE_NEXT_PLAIN, S1_FLOOR_LOWER_LOWEST,
+      S1_FLOOR_LOWER_HIGHEST, S1_DONUT,
     ].freeze
 
     attr_reader :exit_requested, :secret_exit_requested
@@ -115,12 +118,14 @@ module Rubydoom
             true
           when S1_DOOR_OPEN_STAY
             @doors&.open_tagged(ld.sector_tag, kind: :d1)
+          when S1_DOOR_OPEN_CLOSE
+            @doors&.open_tagged(ld.sector_tag, kind: :dr)
           when SR_DOOR_OPEN_CLOSE
             @doors&.open_tagged(ld.sector_tag, kind: :dr)
           when SR_LIFT_LOWER_RAISE
             @plats&.activate_tag(ld.sector_tag)
           when S1_FLOOR_RAISE_NEXT, S1_FLOOR_RAISE_NEXT_PLAIN,
-               S1_FLOOR_LOWER_LOWEST, SR_FLOOR_LOWER_FAST
+               S1_FLOOR_LOWER_LOWEST, S1_FLOOR_LOWER_HIGHEST, SR_FLOOR_LOWER_FAST
             @floors&.handle_use(ld)
           when S1_DONUT
             @donuts&.handle_use(ld)

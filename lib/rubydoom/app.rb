@@ -45,8 +45,7 @@ module Rubydoom
 
     def initialize(wad_path:, map_name: DEFAULT_MAP, scale: DEFAULT_SCALE,
                    dump_frame_to: nil, show_automap: false,
-                   automap_mode: :lines, skill: nil, scenario: nil,
-                   god_mode: false)
+                   automap_mode: :lines, skill: nil, scenario: nil)
       @scale         = scale
       @dump_frame_to = dump_frame_to
       @show_automap  = show_automap
@@ -56,7 +55,6 @@ module Rubydoom
       # set, map_name is overwritten by the scenario's own name for
       # captioning / sky-lookup purposes.
       @scenario      = scenario
-      @god_mode      = god_mode
       map_name       = @scenario.name if @scenario
 
       # Demo playback (RUBYDOOM_PLAY=path.rdm): the file's header decides
@@ -171,7 +169,6 @@ module Rubydoom
       target = @scenario || map_name
       @scenario = nil
       @game.load_map(target)
-      @game.player.toggle_god! if @god_mode && !@game.player.god_mode
       sky = Sky.for_map(map_name, @game.textures)
       @renderer3d = Renderer3D.new(@game.map, @game.bsp,
                                    textures: @game.textures, flats: @game.flats,
