@@ -1,0 +1,563 @@
+rubydoom — implementation notes
+================================
+
+What's built, where it lives, and the design decisions worth knowing
+before changing a subsystem. Companion document to TODO.txt — TODO
+lists what's missing; this one explains what's there.
+
+
+Frontend / simulation split
+---------------------------
+
+Two top-level objects:
+
+  * `Rubydoom::Game` (lib/rubydoom/game.rb) — the simulation. Owns
+    every per-map subsystem (clipper, AI, projectiles, weapons, ...),
+    parses the WAD into palette/colormap/textures/sprites/flats,
+    holds the Player, and exposes a single `tick(input)` that runs
+    the ordered list of subsystem updates. Deliberately doesn't
+    require "gosu" or any window library.
+  * `Rubydoom::App` (lib/rubydoom/app.rb) — the Gosu frontend. Owns
+    the window, per-frame draw, mouse-capture state, sound driver
+    (Gosu::Sample), Gosu-backed image cache, Renderer3D / HUD /
+    Automap, and input polling. Constructs Game, hands in the HUD,
+    drives `game.tick(build_input)` each Gosu update callback.
+
+The seam between them is `Rubydoom::Input` (lib/rubydoom/input.rb),
+a plain Struct with `walk_axis / strafe_axis / turn_axis / look_dx /
+fire / edges`. App is the only thing that knows about Gosu key codes
+and capture state; everything past that point sees only Input.
+
+Gosu is used by app.rb, renderer3d.rb, automap.rb, gosu_image_cache.rb,
+framebuffer.rb, hud.rb, sound.rb, and wipe.rb — that's the frontend
+layer. The first four `require "gosu"` explicitly; the others use Gosu
+types via the transitive load. A future SDL2/Raylib/headless frontend
+would replace all eight and provide an equivalent renderer + sound
+driver + image cache + screen-wipe, but Game and every per-map
+subsystem are pure Ruby and would carry over byte-identical.
+
+Map transitions stay App-orchestrated: App reads
+`game.switches.exit_requested` after each tick, calls
+`game.load_map(next)`, and rebuilds Renderer3D + Automap from the
+new map. Game's `load_map` rewires every subsystem internally — the
+late-bound setters (`@switches.doors=`, `@combat.ai=`, ...) are
+concentrated there rather than scattered across the frontend.
+
+
+Switch / use-action linedef specials
+------------------------------------
+
+`lib/rubydoom/switches.rb` ray-casts USE_RANGE forward from the player
+and dispatches by special_type. Wired today:
+
+  * 11  — S1 Exit Level — sets exit_requested.
+  * 103 — S1 Door Open Stay (remote by tag) — delegates to
+          `Doors.open_tagged(tag, kind: :d1)`.
+  * 62  — SR Lift Lower-Wait-Raise (remote by tag) — delegates to
+          `Plats.activate_tag(tag)`. Repeatable: special_type isn't
+          cleared, only S1* specials are.
+  * 20  — S1 Floor Raise To Next Higher (Change Tex & Type) —
+          delegates to `Floors.handle_use(ld)`.
+  * 9   — S1 Donut (remote by tag) — delegates to
+          `Donuts.handle_use(ld)`. Pillar lowers, surrounding ring
+          raises with the model sector's floor texture + special.
+
+Gun-trigger specials (G*) come in through `Switches.try_shoot(ld)`
+instead. `Weapons` calls a `wall_hit_handler` (wired by Game) when
+a hitscan's nearest blocking line carries a non-zero special, and
+Game routes that to `Switches.try_shoot`. Wired today:
+
+  * 46  — GR Door Open Stay (remote by tag, repeatable). Delegates
+          to `Doors.open_tagged(tag, kind: :d1)`. GR leaves the
+          linedef's special intact.
+
+On activation the front sidedef's switch texture is swapped
+(SW1xxx ↔ SW2xxx) for the visual click. Switch types in ONCE_ONLY
+get special_type cleared so they can't be re-pressed.
+
+`Doors.open_tagged(tag, kind:)` opens every sector with the matching
+tag as a stay-open (`:d1`) or normal (`:dr`) door. It's the
+EV_DoDoor equivalent — distinct from `try_use` which works off a
+ray-hit linedef and consults DOOR_SPECIALS.
+
+`Plats.activate_tag(tag)` returns a boolean now so the switch
+dispatcher can tell a real activation from a tag match with no
+effect (e.g. all matching sectors are already lowered).
+
+
+Sector specials
+---------------
+
+All E1M1 and E1M2 sector special_types are wired:
+
+  * 1, 2, 3, 8, 12, 13 — light effects, in `sector_lights.rb`. We
+    mutate `sector.light_level` directly each tic; the renderer reads
+    the live field without changes. Types 2/3 are fast/slow blink with
+    random per-sector phase; 12/13 are the corresponding sync
+    variants. 1 is random light flash; 8 is the smooth glow.
+  * 7  — 5% damage nukage and 9 — secret, in `sector_effects.rb`.
+    Damage every 32 tics while the player stands on the floor; secret
+    increments `player.secrets_found` once and clears the special.
+
+
+Pickup logic
+------------
+
+Health, armor, and ammo pickups are wired in `lib/rubydoom/pickups.rb`.
+Each tic, the class scans non-solid pickup things for AABB overlap
+with the player; on touch it dispatches to a `pickup_*` method on
+Player, which returns whether the item was actually absorbed
+(stimpack at full health → not absorbed, stays on the floor).
+Absorbed items get `thing.removed = true` and the renderer skips
+them.
+
+Done: stimpack, medikit, soulsphere, health bonus, green/blue armor,
+armor bonus, clip, shell pack, bullet box, shell box, rocket box,
+backpack.
+
+
+Weapon firing and combat
+------------------------
+
+  * Player.weapons_owned + pending_weapon, pickup_weapon (auto-
+    switch on first pickup, ammo grant per vanilla CLIPAMMO).
+  * Pickups dispatch for SHOT(2001) / MGUN(2002) / LAUN(2003) /
+    CSAW(2005).
+  * Weapons state machine (lib/rubydoom/weapons.rb) — PSPR fire
+    sequence per weapon (lump, tics, action), ammo decrement on
+    fire frames, refire while button held, deferred weapon switch
+    via Player.pending_weapon honoured at next "ready".
+  * Number keys 1–7 in App#button_down emit :weapon_N edges; Game's
+    tick consumes them via Weapons#request_switch. Key 1 cycles
+    fist <-> chainsaw when both owned.
+  * Fire button: Ctrl (either) and mouse-left while captured.
+  * HUD draws Weapons#display_lump instead of always-idle lump.
+  * Hitscan (lib/rubydoom/hitscan.rb): autoaim-aware ray cast.
+    First pass picks the nearest shootable the player has 3-D
+    line of sight to (via Sight#visible? to the body center) and
+    computes a vertical slope toward it; second pass walks the
+    linedefs and shootables again, blocking lines whose vertical
+    opening doesn't contain the ray at z = eye + slope*t. Returns
+    [:wall, x, y] / [:thing, thing, x, y] / nil. Without autoaim
+    an imp on a raised ledge sits behind a "blocked" opening from
+    a player on the lower floor; with it, the slope rises over
+    the step. Combat#shootables yields [thing, radius, height] so
+    targets also get a vertical-extent test.
+    Pistol/chaingun/shotgun spread done.
+
+
+Shootable mobjs (Combat module)
+-------------------------------
+
+`lib/rubydoom/combat.rb` manages per-thing combat state — health,
+death animation, splash damage. Two kinds today: exploding barrel
+(2035, MT_BARREL) and monsters (POSS/SPOS/TROO/SARG).
+
+Barrels:
+  * 20 spawn health, dies after a single shotgun blast or ~2
+    pistol shots in luck-of-the-roll.
+  * On death, MF_SOLID is cleared (player walks through wreckage)
+    via the `thing.solid_override = false` field that Clipper
+    consults at query time.
+  * Sprite cycles through BEXP A/B/C/D/E over 35 tics via
+    `thing.sprite_override` / `frame_override` that the renderer
+    falls back to before ThingTypes. On the last frame the thing
+    is `removed = true` and vanishes.
+  * Radius damage on detonation: linear falloff out to 128 units,
+    max 128 damage. Applied symmetrically — the player AND every
+    live monster mobj in range takes falloff_damage. Chain-
+    detonates other barrels (their 20 HP is below the falloff
+    damage at point-blank). At the edge of the radius all targets
+    take ~1 damage; at the centre, 128.
+
+Combat's Mobj struct is identity-keyed in `@by_thing`
+(`Hash.compare_by_identity`) because Thing is a value-equality
+Struct — mutating its fields (sprite_override, frame_override)
+would shift its hash bucket and break `mobj_for(thing)` lookups
+mid-game.
+
+
+Enemy AI
+--------
+
+State-machine port from linuxdoom-1.10/p_enemy.c.
+
+  * State tables for POSS / SPOS / TROO / SARG
+    (lib/rubydoom/monster_states.rb): idle ↔ stnd cycle, 8-step
+    run cycle, attack sequence, pain, death-to-corpse.
+  * MonsterInfo (mobjinfo subset) — health, radius, height, speed,
+    pain_chance, reaction_time, see/pain/melee/missile/death state
+    pointers, per-species sound names.
+  * Combat spawns monster mobjs alongside barrels; shootables list
+    includes alive monsters at their per-species radius.
+  * MonsterAI (lib/rubydoom/monster_ai.rb) — action dispatch from
+    Combat#enter_state. Handlers: a_look, a_chase, a_face_target,
+    a_pos_attack, a_spos_attack, a_troo_attack, a_sarg_attack,
+    a_pain, a_scream, a_fall. a_chase gates the entry into melee /
+    missile states on can_see_player? (vanilla P_CheckMeleeRange /
+    P_CheckMissileRange) — without it, a monster woken by a noise
+    alert in a different room would fire blindly and the gunshot
+    sound would carry across the level even though the bullet hit
+    a wall.
+  * Sight (lib/rubydoom/sight.rb) — ray-vs-linedef LOS test with
+    eye-height vertical-opening gate. ML_BLOCKING two-sided lines
+    (window slits) don't block sight. No REJECT yet (correctness
+    OK, just slower than vanilla).
+  * MonsterMovement — 8-direction try_walk + P_NewChaseDir port,
+    using Clipper#position_valid? at the mobj's species radius
+    with start_x/y for the bb_straddles? step-up exemption and
+    allow_dropoff: false for the MF_DROPOFF "no walking off
+    ledges" rule. Plus mob-mob AABB overlap check.
+  * Damage routes through Combat#damage (Hitscan + Weapons plug
+    in via Combat#shootables). Pain rolled by painchance/256.
+  * On death: solid cleared, MF_SOLID equivalent, state_key set
+    to death sequence, corpse stays on the last frame forever.
+  * Renderer's pick_rotation reads thing.angle, so updating
+    move_dir→angle each tic gives correct A1..A8 sprite rotation.
+
+
+Lost soul charge attack
+-----------------------
+
+Lost Soul (MT_SKULL, doomednum 3006) doesn't fire a projectile — instead
+the mobj itself dives at the player. Wired through the same monster
+state machine as everyone else, with an extra "skullfly" path on the
+Combat mobj for the velocity-based motion:
+
+  * MonsterInfo: doomednum 3006, health 100, radius 16, height 56,
+    pain_chance 256 (always pain), see_sound nil (silent wake),
+    attack_sound :sklatk, death_sound :firxpl. No melee_state — the
+    bash damage decides at runtime, same trick as cacodemon /
+    Baron.
+  * MonsterStates: skull_stnd/run/atk/pain/die. The atk3/atk4 pair is
+    the in-flight body animation that loops while the dive is in
+    motion. Terminal frame `skull_remove` runs :remove_mobj which
+    clears thing.removed, matching vanilla's `nextstate = S_NULL`
+    despawn (lost souls leave no corpse).
+  * MonsterAI :skull_attack: A_FaceTarget, then SKULLSPEED = 20 mu/tic
+    velocity is loaded into mobj.vx / vy / vz aimed at the player's
+    eye height. mobj.skullfly flips to true.
+  * Combat#advance_skullfly runs every tic while skullfly is set,
+    independent of the state-machine frame timer. Per-tic:
+      - Player AABB overlap → take_damage((rand%8+1)*3 = 3..24),
+        end dive.
+      - Other live mobj overlap (skip self) → Combat#damage with
+        the soul as source (so pain/death/infighting all fire),
+        end dive.
+      - Clipper#position_valid? rejection at destination → end dive,
+        no damage (vanilla's "soul bashes against the wall, stunned").
+      - z punches floor/ceiling → end dive.
+    On dive end, mobj.skullfly clears, velocity zeros, z_override
+    drops (renderer returns to floor-height), and state resets to
+    spawn_state via enter_state — same as vanilla after MF_SKULLFLY
+    clears.
+  * Renderer: thing.z_override carries the dive z each tic so the
+    soul actually appears in flight rather than skating along the
+    floor. Outside of the dive, z_override is nil and the renderer
+    falls back to sector.floor_height (same as cacos).
+
+Lumps are absent from shareware doom1.wad (SKUL sprites + dssklatk are
+commercial-only). The soul will spawn invisibly with a silent attack
+sound against doom1.wad — gameplay path still runs.
+
+
+Monster projectiles
+-------------------
+
+`lib/rubydoom/projectiles.rb` runs in-flight missiles. Currently only
+the imp fireball (vanilla MT_TROOPSHOT) is wired:
+
+  * A_TroopAttack picks melee vs. missile by approx_dist; in missile
+    range it calls Projectiles.spawn_imp_fireball, which computes the
+    aim vector to the player's eye and stores per-tic (vx, vy, vz)
+    plus the launch z = imp floor + 32 (vanilla chest height offset).
+    Speed is 10 mu/tic, damage is `(rand%8+1)*3`.
+  * The projectile lives as a synthetic Map::Thing inserted into
+    map.things so the renderer picks it up for free. Sprite is BAL1
+    A/B alternating at 4 tics each in flight, BAL1 C/D/E at 6 tics
+    each on detonation.
+  * Map::Thing got a `z_override` field; Renderer3D#draw_billboard
+    reads `thing.z_override || sector.floor_height` so projectiles
+    render at the height they're flying at instead of being stuck to
+    the ground. (Static things still take the floor path.)
+  * Per-tic step: advance position, then in this order: bail with an
+    explosion if the new z punches the sector floor or ceiling; bail
+    with an explosion if Sight#visible? from old→new is blocked by a
+    wall; check AABB overlap with the player and live monsters
+    (skipping the owner so the imp doesn't self-detonate) — on hit,
+    apply damage and explode.
+  * Damage routes: Combat#damage for monster hits (so pain/death runs
+    normally), Player#take_damage for the player. Owner exclusion
+    means the player can't get hit by their own missiles either, once
+    we add the RL/plasma later.
+  * Sounds: dsfirsht plays on launch (listener = target), dsfirxpl on
+    detonation (source = projectile so the channel-per-source rule
+    doesn't kill the launch sound mid-flight).
+  * Hard lifetime cap of 175 tics (~5s) so a fireball that finds an
+    infinite vista doesn't accumulate forever.
+
+
+Sound propagation (P_NoiseAlert)
+--------------------------------
+
+`lib/rubydoom/noise_alert.rb` is the vanilla P_RecursiveSound port.
+Each gunshot / door open / walk-trigger lift floods the sector
+graph through two-sided open lines (ML_SOUNDBLOCK gates it to
+two crossings deep), marking each reachable sector's `soundtarget`.
+A_Look reads that target on its next tic and acquires the player
+without needing a sight check.
+
+Wake triggers wired today:
+  * Player fires any weapon (Weapons.emit_noise on action frames).
+  * Player USE-opens a door (Doors.try_use).
+  * Any walk-trigger lift/floor activation (Game.handle_walk_cross).
+
+
+Skill levels
+------------
+
+Map.load takes a `skill:` kwarg (default `SKILL_DEFAULT = 2`, HMP):
+
+  0  TYTD / 1  HNTR — thing must have MTF_EASY     (flag 0x01)
+  2  HMP             — thing must have MTF_NORMAL   (flag 0x02)
+  3  UV   / 4  NM    — thing must have MTF_HARD     (flag 0x04)
+
+Multiplayer-only things (MTF_MULTIPLAYER 0x10) are dropped in
+single-player. Player starts (1-4), DM start (11), and teleport
+landing (14) are exempt from the filter so the map's player_start
+always exists regardless of skill.
+
+App accepts `skill: 0..4` via constructor kwarg or the
+`RUBYDOOM_SKILL` env var; both flow through to `Map.load`.
+
+Counts for reference on E1M1 / E1M2 / E1M3 (monsters per skill):
+  TYTD:  4 / 20 / 34
+  HMP :  6 / 41 / 74
+  UV  : 29 / 79 / 131
+
+
+Player death + respawn
+----------------------
+
+Player.dead? returns true when health <= 0. Game routes around the
+dead state: movement input is blocked, view height interpolates
+down to DEAD_VIEW_HEIGHT = 8 (vanilla deathviewheight), the
+weapon sprite stops drawing, pickups stop being absorbed. App
+collapses every action key (Fire / Use / Mouse-left while
+captured) to a :respawn edge, which Game consumes via Player.reset_to_start!,
+which brings the player back at the map's player_start with
+pistol-start loadout (health 100, fist+pistol, no keys, no armor).
+The map state (open doors, dead monsters, picked-up items) is
+preserved across the respawn.
+
+God mode (vanilla IDDQD): press `G` to toggle Player.god_mode. While
+on, Player#take_damage short-circuits before any HP / armor is spent,
+so every monster bullet, fireball, barrel splash and damage-floor
+tick is ignored. Toggling on also heals to 100 if HP was below it
+(matching IDDQD), so pressing G while dead also resurrects in place.
+Toggling off doesn't change HP. State is sticky across map
+transitions and respawns until the player toggles back off.
+
+
+Screen-tint flashes
+-------------------
+
+Vanilla DOOM swaps the active palette to one of the 14 PLAYPAL
+variants to wash the screen red on damage and gold on pickups. We
+approximate this with a translucent fullscreen Gosu.draw_rect drawn
+last (z = 1000, above the HUD) — same effect, doesn't require
+re-rendering through a different colormap.
+
+Two counters on `Player` drive it:
+  * `damage_count` — bumped by the *raw* incoming damage (pre-armor)
+    on every `take_damage`, capped at 100. Decays 1/tic.
+  * `bonus_count`  — reset to BONUSADD (6) on every successful
+    pickup (Pickups#update_tic calls `player.flash_bonus!`).
+    Decays 1/tic.
+
+`Player#screen_tint` returns the active [r,g,b,a] overlay or nil.
+Red takes priority over gold (matches vanilla V_SetPalette). The
+math `(count + 7) >> 3` maps a raw count to the 1..8 (red) / 1..4
+(bonus) intensity level. Both counters are transient — not carried
+across map transitions, reset by `Player#reset_to_start!`.
+
+Not yet wired: green tint for the radiation-suit powerup
+(palette 13). Powerups as a whole are still TODO.
+
+
+HUD face state machine
+----------------------
+
+`Rubydoom::Face` (lib/rubydoom/face.rb) drives the status-bar mugshot.
+Five of vanilla's nine prioritized states are wired:
+
+  * Dead      `STFDEAD0`      — health <= 0
+  * God       `STFGOD0`       — `player.god_mode`
+  * Ouch      `STFOUCH{P}`    — > 20 damage drop in one tic (35 tics)
+  * Evil grin `STFEVL{P}`     — `weapons_owned` count increased (70 tics)
+  * Wander    `STFST{P}{D}`   — default; direction re-rolls every 35 tics
+
+P is the vanilla pain offset `((100 - health) * 5) / 101` clamped 0..4
+(bands at 80 / 60 / 40 / 20). D is 0/1/2 for center/right/left.
+
+Detection is state-diff driven: Face stores `prev_health` and
+`prev_weapons_count` and compares against the live player each tic.
+That means no callback wiring through Pickups/Combat is needed —
+Face just observes. Reset_to_start lowers weapons_count back to 2,
+which correctly does NOT re-trigger evil grin (count has to *go up*).
+
+Not yet wired (need extra plumbing):
+  * Turn-toward-attacker (STFTR / STFTL) — needs `Player#take_damage`
+    to know the damage source so we can compute left/right relative
+    to player angle. Combat / Projectiles / SectorEffects all
+    currently call `take_damage(amount)` with no source argument.
+  * Rampage (STFKILL) — needs a fired-without-being-hit counter on
+    Weapons.
+
+
+Exit transition
+---------------
+
+Hitting the exit switch jumps straight to the next map in WAD
+lump order via `Map.next_in_wad` (no intermission screen). For
+shareware doom1.wad this matches vanilla traversal through E1M8;
+after E1M8 it lands on E1M9 (the secret level) because that's
+directory order, whereas vanilla ends the episode at E1M8 and
+routes E1M9 only from E1M3's secret exit.
+
+Inventory carries across the transition (vanilla single-player
+rule): `Game#carry_inventory_from` copies health, armor, ammo,
+max_ammo (so backpack doubling persists), the backpack flag,
+weapons_owned, current_weapon, and god_mode onto the freshly-
+spawned player at the new map's player_start. Keys reset (each
+map has its own keyset). `pending_weapon` clears since the prior
+Weapons state machine is gone. Death + respawn still routes
+through `Player#reset_to_start!`, which is pistol-start as
+before.
+
+
+Sound playback
+--------------
+
+Combat audio is wired through lib/rubydoom/sound.rb. The Sound
+class unwraps DMX DSxxxx containers (8-byte header, 16-byte
+leading + trailing pad samples, unsigned 8-bit PCM mono), wraps
+the audio in a minimal RIFF/WAV file, and hands the temp path
+to Gosu::Sample. Lumps load lazily; missing lumps (shareware
+doom1.wad lacks several full-game sounds) yield a no-op play.
+play_at(name, x, y, listener, source:) attenuates by distance
+with vanilla's S_CLOSE_DIST=200 / S_CLIPPING_DIST=1200 linear
+falloff.
+
+Per-source channel: vanilla DOOM gives each mobj one active
+sound channel — when a new sound fires, the old one on that
+source is stopped. Otherwise the same monster firing twice in a
+row would double-stack the same pistol sample. Sound#play and
+play_at take a `source:` kwarg; the previous SampleInstance on
+that source is `.stop`'d before the new one starts. Sources used:
+monster mobj for sight / pain / scream / attack, player for
+firing + pain + death, sector for doors / lifts, linedef for
+switches, barrel mobj for explosion. Pickups don't pass a source
+(multiple item-up clicks in rapid succession is fine to stack).
+
+Wired hooks:
+  * Player weapons: dspistol, dsshotgn (chaingun reuses dspistol).
+  * Player damage: dsplpain on any HP drop, dspldeth at lethal.
+  * Monster sight on wake: per-species see_sound (posit1, bgsit1,
+    sgtsit).
+  * Monster pain (A_Pain action): popain / dmpain.
+  * Monster death (A_Scream action): podth1 / bgdth1 / sgtdth.
+  * Monster attack: pistol (POSS), shotgn (SPOS), claw (TROO),
+    sgtatk (SARG).
+  * Barrel detonation: barexp.
+  * Doors: dsdoropn on open, dsdorcls on close.
+  * Lifts: dspstart on start of descend/ascend, dspstop on hitting
+    bottom and top.
+  * Switches: dsswtchn for normal switches, dsswtchx for the level
+    exit. Played at the switch's linedef midpoint.
+  * Pickups: dsitemup for health / ammo / armor / keys / backpack,
+    dswpnup for weapon pickups.
+
+
+Title screen and screen-melt wipe
+---------------------------------
+
+Launch sequence: App holds the TITLEPIC patch on screen for
+TITLE_HOLD_TICS (105 = ~3s at 35Hz; vanilla pagetic is 170), then
+melts it into the first map via the iconic column-melt wipe. Any key
+during the hold collapses the timer to 1 so the wipe starts the
+following tic. Esc still quits.
+
+`Rubydoom::Wipe` (lib/rubydoom/wipe.rb) is a port of vanilla
+f_wipe.c. The "old" image is captured via `Gosu.render` (real
+texture, not a macro — `subimage` doesn't work on macros) and diced
+into NUM_COLS = 160 vertical strips, each 2 pixels wide. Each strip
+gets a random head-start delay in [-15, 0]; neighbours can drift by
+at most one from their predecessor, so the bottom edge of the melt
+is irregular but continuous. Per tic, each column accelerates: while
+y < EASE_IN_THRESHOLD (16), dy = y + 1; thereafter dy = FAST_DY (8),
+clamped so y never exceeds SCREEN_HEIGHT. The wipe is done when
+every column has fallen off.
+
+App suppresses `game.tick` while either the title or the wipe is up,
+matching vanilla's full pause during the melt. Pending input edges
+get cleared each frozen tic so a button held during the wipe doesn't
+fire the instant control returns.
+
+Map transitions: when `game.switches.exit_requested` fires, App
+captures the current scene (also via Gosu.render), calls
+`load_map(next)`, and constructs a fresh Wipe with the saved scene
+as the "old" image. The new map renders behind the falling strips.
+
+Debug knobs (dump mode):
+  * RUBYDOOM_DUMP_TITLE=1   — dump TITLEPIC only.
+  * RUBYDOOM_WIPE_TICS=N    — dump playfield with the title mid-wipe
+                              at tic N. Verifies that the strips
+                              composite over the new scene.
+
+
+Demo record / playback (benchmark workload)
+-------------------------------------------
+
+Project intent is for rubydoom to act as a benchmark for Ruby and
+its JIT compilers. A demo is a per-tic stream of `Input` values; a
+shared seedable RNG (Game's @rng, threaded through every sim
+subsystem) plus a known starting map and skill make replay
+bit-deterministic.
+
+  RUBYDOOM_SEED=N       — seed the master RNG. Without it, every run
+                          picks a fresh seed (live play behavior).
+  RUBYDOOM_RECORD=path  — append per-tic input to `path` while playing.
+                          Header carries skill, seed, and map name so
+                          the demo is self-describing.
+  RUBYDOOM_PLAY=path    — replay a demo. Skill / seed / map come from
+                          the file's header; cmdline overrides are
+                          ignored so the replay is faithful.
+  RUBYDOOM_BENCHMARK=1  — bypass Gosu entirely. bin/rubydoom routes
+                          to Rubydoom::HeadlessRunner: constructs
+                          Game + Renderer3D directly, replays the
+                          demo, and ticks sim + render-to-framebuffer
+                          with no GL context, no vsync, and no GPU
+                          upload. On demo EOF prints `tics`, `wall`,
+                          `tps`, `ms/tic`, GC stats, and a SHA-1 of
+                          the final frame so byte-output can be
+                          compared across JIT modes.
+
+Sound is suppressed during playback (deterministic + no `dsm…`
+lookups in the hot loop). The headless benchmark constructs no
+Sound at all and never opens a window.
+
+Renderer3D#draw(player, present: false) skips the closing
+`fb.to_gosu_image.draw` line so the renderer is usable outside a
+GL context — the framebuffer is reachable via `renderer.framebuffer`
+for shasum / inspection. Live App always calls with the default
+`present: true`.
+
+File format is documented at the top of lib/rubydoom/demo.rb:
+4-byte magic + version + skill + u64 seed + map name + a stream of
+records (axis bytes + look_dx s16 + edge codes). Adding a new edge
+appends to EDGE_CODES so older demos still replay.
+
+Wrapper script: `scripts/benchmark_demo.rb demo.rdm` enables YJIT
+(unless RUBYDOOM_DISABLE_YJIT is set) and invokes App with the
+right env vars.
