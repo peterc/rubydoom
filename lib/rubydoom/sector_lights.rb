@@ -89,7 +89,7 @@ module Rubydoom
         when GLOW
           mn = min_neighbor_light(s)
           @lights << Light.new(s, :glow, s.light_level, mn, :down, 0, nil)
-        when STROBE_FAST
+        when STROBE_FAST, 4 # fast strobe + damage; preserve special 4
           add_strobe(s, STROBE_FAST_DARK, sync: false)
         when STROBE_SLOW
           add_strobe(s, STROBE_SLOW_DARK, sync: false)

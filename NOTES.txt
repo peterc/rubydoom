@@ -5,6 +5,10 @@ What's built, where it lives, and the design decisions worth knowing
 before changing a subsystem. Companion document to TODO.txt — TODO
 lists what's missing; this one explains what's there.
 
+Additional map-special coverage (switch stairs, tagged floor/door/lift
+actions, and damaging fast strobes) is documented in docs/specials.md,
+including tests and the remaining floor-bound collision approximations.
+
 
 Frontend / simulation split
 ---------------------------

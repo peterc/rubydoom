@@ -1,0 +1,242 @@
+rubydoom — TODO
+================
+
+Outstanding work, grouped by subsystem. For what's already built and
+how it fits together, see NOTES.txt.
+
+
+Sector specials
+---------------
+
+  * Damage tiers 4 (20% + fast blink), 5 (10%), 7 (5%), 11 (20%
+    + end-of-level on health<=10), and 16 (20%) are done. Type 4
+    includes radiation-suit leakage; type 16 still grants complete
+    suit protection rather than vanilla's occasional leakage.
+  * Other light effects: type 17 (fire flicker) is done. Types 2/3
+    (fast/slow non-sync strobes), 12/13 (sync siblings), 1 (random
+    flash), 8 (glow) are also done.
+
+
+Linedef specials beyond E1M1
+----------------------------
+
+The dispatcher in Game#handle_walk_cross and Switches#try_use is keyed
+on specific special_type integers. To run other E1 maps:
+
+  * Doors: types 4, 105, 108, 109, 110, 111, 112, 113, 114,
+           115, 117, 118, 133, 134, 135, 137 (variants on speed,
+           stay-open, key required, walk/switch trigger). Done:
+           types 1/26/27/28, 31/32/33/34 (keyed DR/D1), 2 (W1 Open
+           Stay), 16/76 (W1/WR Close-30-Then-Open), 46 (GR Open Stay,
+           gun trigger), 63 (SR Open Close), 90 (WR Open Stay),
+           103 (S1 Open Stay), 3/75 (W1/WR Close), 42 (SR Close),
+           61 (SR Open Stay).
+  * Lifts: 53, 95, 120, 121, 122, 123 — fast
+           variants, raise-and-change, etc. Types 62 (SR) and 88
+           (WR), 10 (W1), 21 (S1), 87 (WR perpetual), and 89 (WR
+           stop) are done. Type 22 is handled under Floors below.
+  * Floors: 60, 64, 65, 68, 69, 71,
+            83, 84, 92, 93, 96, 101, 119, 128, 129, 130, 131,
+            132, 140.
+            Done: 5 / 91 (W1 raise to low ceiling), 18 (S1 raise to
+            next), 20 (S1 raise to next + change — change still TODO),
+            22 (W1 raise to next + change), 23 / 82 (S1/WR lower to
+            lowest), 36 / 98 (W1 lower fast), 70 (SR lower fast),
+            86 (WR raise to next), 102 (S1 lower to highest).
+            Added: 14 (S1 raise 32 + texture), 19 (W1 lower to
+            highest), 24 (G1 raise to low ceiling), 30 (W1 raise by
+            shortest lower texture), 37 (W1 lower + change), 38 (W1
+            lower to lowest), 56 (W1 raise + crush, floor-bound
+            approximation), 58/59 (W1 raise 24, without/with change).
+  * Ceilings: 6, 25, 40, 41, 43, 44, 49, 72.
+  * Stairs (built by switch): 100, 127. Types 7 (S1 build-8) and
+    8 (W1 build-8) are done.
+  * Donuts (pillar + ring): 9 — done.
+  * Teleports: 39 (W1). Type 97 (WR) is done — warps the player to
+    the Teleport Destination thing (doomednum 14) inside the tagged
+    sector, preserves its angle, plays dstelept. Monsters crossing a
+    teleporter don't warp yet (Clipper.on_cross is player-only).
+  * Lights: 17, 79, 80, 81, 104, 138, 139. Types 35 (W1 light to 35)
+            and the strobes 2/3/12/13 are done.
+  * Exits: 11 (S1 normal — done), 51 (S1 secret — done),
+           52 (W1 normal — done), 124 (W1 secret — done).
+
+See docs/specials.md for this pass's coverage, tests, and limitations.
+Existing mappings also need a fidelity audit: 86 should open a door,
+90 should open/wait/close, and 91/98 should be repeatable. These
+pre-existing behaviors were not changed in this coverage pass.
+
+A clean way to add coverage: pull the type-number → behavior mapping
+into a table in `lib/rubydoom/linedef_specials.rb` so adding a row is
+one line instead of a new `case` branch. Worth doing once we need
+more than ~5 special families.
+
+
+Walk-trigger direction sensitivity
+----------------------------------
+
+Vanilla DOOM fires some walk-triggers only when crossed front→back
+(the player approaches from the side of the front sidedef).
+`Clipper#emit_crossings` currently fires on any cross. For E1M1 this
+is fine — its W1 type-36 trigger and WR type-88 trigger both want
+to fire either way. Add a per-special direction flag if a future
+map depends on it.
+
+
+Pickups
+-------
+
+  * Powerups: map / light visor still missing — both are renderer
+    hooks. Radsuit, invisibility, berserk, and invulnerability are
+    done — wired through `Player#powers` with a per-tic decrement in
+    `Player#tic_powers!`. Invulnerability short-circuits
+    `Player#take_damage` (the god-mode early-return) and paints a
+    white screen tint via `Player#screen_tint`; vanilla's exact
+    INVERSEPAL flip would need a colormap toggle in the renderer.
+  * Powerup pickup sound (dsgetpow) — wired.
+
+
+Weapons
+-------
+
+  * BFG: fully wired. Charge sequence (S_BFG1..4 = 60 tics) plays
+    dsbfg on entry, fires the missile on the third frame. MT_BFG
+    green ball (BFS1 flight, BFE1 detonation, 100..800 direct damage)
+    triggers A_BFGSpray on the BFE1 C frame — 40 hitscan tracers from
+    the player's position in a ±45° cone at the ball's flight angle,
+    each tracer 15..120 damage, range 1024 mu. Lumps missing from
+    shareware doom1.wad — only fires against commercial doom.wad.
+    Decorative MT_EXTRABFG (BFE2 hit-sprite per victim) is the only
+    piece skipped — pure visual, no gameplay effect.
+  * Muzzle flash light boost (vanilla bumps sector brightness near
+    the player for the flash-frame tics). Cosmetic; needs a
+    per-frame "extra light" pass through the renderer's light
+    selection.
+  * Weapon switch animations (PSPR drops out the bottom, new one
+    rises in). Currently snap-switch on next ready. Cosmetic.
+
+
+Enemy AI
+--------
+
+  * Cacodemon (MT_HEAD, MT_HEADSHOT) wired — 96 of them across
+    E2+E3 in commercial doom.wad, zero in E1. Vanilla bite (10..60)
+    plus BAL2 fireball (5..40, speed 10). MF_FLOAT / MF_NOGRAVITY not
+    modelled — cacos sit on the floor instead of hovering; gameplay
+    works but the visual is wrong. Hell Knight is Doom 2 only — no
+    instances in any episode of doom.wad / doom1.wad, so we skip it.
+  * E2/E3 bosses: Cyberdemon (MT_CYBORG, doomednum 16) fires rockets
+    — would reuse Projectiles#spawn_rocket. Spider Mastermind
+    (MT_SPIDER, doomednum 7) fires hitscan chaingun bursts — would
+    reuse Hitscan. Both also need MT_BOSSBRAIN-style A_BossDeath
+    gating for E2M8 / E3M8 floor lowers.
+  * Vanilla extreme-death (XDIE) for overkill damage (>= mobj.health
+    in vanilla) is skipped — overkill falls through to the normal
+    death sequence. Cosmetic.
+  * Player-vs-monster vertical clipping not modeled — monsters can
+    walk under low ceilings the player can't (and vice versa).
+  * MF_DROPOFF / MF_FLOAT not modeled per-species. Every monster
+    behaves as if MF_DROPOFF is clear (refuses ledges >24). Correct
+    for POSS / SPOS / TROO / SARG / SKULL; pain elementals will need
+    a per-mobjinfo flag when they show up. Lost souls in vanilla
+    also float vertically toward the target's z via MF_FLOAT during
+    chase — we ignore that and keep them on the floor outside of
+    their charge dive, same approximation we use for cacodemons.
+  * Kill counter on the HUD. Mobjs are tagged FLAG_COUNTKILL but
+    nothing reads it yet.
+
+
+Skill levels
+------------
+
+  * Nightmare-specific behaviours: 2x monster movement speed, 12s
+    monster respawn, infinite ammo in single-player. Currently NM
+    spawns the UV thing set with normal speed and no respawn.
+
+
+Player death
+------------
+
+  * PSPR weapon-drop animation (the gun lowers off-screen over ~6
+    frames before disappearing). We just stop drawing it.
+  * Vanilla "dead" view rolls the camera slightly. Cosmetic.
+
+
+HUD
+---
+
+  * `player.secrets_found` is updated but not drawn anywhere. Stat
+    panel goes between map start and intermission once we have
+    items / kills counters too.
+  * Face turn-toward-attacker (STFTR / STFTL). Player#take_damage
+    needs a `source:` kwarg piped through Combat / Projectiles /
+    SectorEffects so Face can compute attacker-vs-player angle.
+  * Face rampage (STFKILL). Weapons needs a "fired without being
+    hit" counter — show STFKILL once it exceeds ~50 tics.
+
+
+Exit transition
+---------------
+
+  * Intermission screen with par time and kills/items/secrets counts,
+    click to advance. (The screen-melt wipe between scenes is wired —
+    see Wipe / NOTES.txt.)
+  * Secret-exit type 124 (W1) — only type 51 (S1) is wired into
+    Switches.secret_exit_requested so far. Same routing logic, just
+    needs adding to the walk-trigger dispatcher.
+
+
+Sound
+-----
+
+  (Player landing oof, monster active grunts, and listener-relative
+  panning are all wired now.)
+
+
+Z-axis / vertical physics
+-------------------------
+
+Player is glued to `floor_at(x, y)`. No falling, no jumping. Lifts
+work because the player's apparent height equals the sector's
+current floor, which moves with the lift. This breaks if:
+  * Player jumps off a ledge — they'd just teleport down to the
+    new floor instantly (currently happens silently).
+  * Lift comes up under a player who walked off it — collision
+    against the rising ceiling not modeled.
+
+For E1M1 traversal this is fine; for combat / falling / rocket
+jumps later, needs real z.
+
+
+Renderer at sub-radius wall proximity
+-------------------------------------
+
+If the camera ends up within `PLAYER_RADIUS` (16) of a wall
+surface — normally impossible since collision uses a BB-straddle
+rule that blocks corners and squeeze-through cases that the older
+center-side check missed, but still reachable via the RUBYDOOM_X /
+RUBYDOOM_Y env-var debug spawn — close segs project off-screen
+(`sy_front_ceil` goes hugely negative because the ceiling is far
+above the eye relative to the tiny z), so the renderer doesn't
+emit ceiling visplane spans for those columns. The upper-half sky
+pre-fill masks the gap as "looking up at sky" instead of as a HOM
+hole. Real fix would be to either:
+
+  * Clamp the rendering camera to be at least PLAYER_RADIUS from
+    every wall surface (pure-renderer guard, doesn't affect physics).
+  * Sweep accumulated visplane spans to fill any column whose top
+    isn't actually covered by a wall, using the camera's own sector.
+
+Neither is needed in normal play — only matters when debugging with
+env-var spawn into impossible positions.
+
+
+Misc
+----
+
+  * `Plats` / `Floors` / `Doors` each rebuild a sector-neighbors
+    cache; extract into a shared helper on `Map` once a third user
+    appears.
+  * `Doors` is unaware of any other moving-floor system, so a door
+    that descends into a moving floor won't notice. Not relevant in
+    E1M1 but a soundness issue for arbitrary WADs.

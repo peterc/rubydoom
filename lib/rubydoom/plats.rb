@@ -17,10 +17,11 @@ module Rubydoom
 
     WR_LIFT = 88
 
-    Plat = Struct.new(:sector, :high, :low, :state, :timer)
+    Plat = Struct.new(:sector, :high, :low, :state, :timer, :perpetual, :old_state)
 
-    def initialize(map)
+    def initialize(map, rng: Random.new)
       @map     = map
+      @rng = rng
       @active  = {}
       @neighbors_cache = nil
       @sound    = nil
@@ -33,9 +34,22 @@ module Rubydoom
     attr_writer :sound, :listener
 
     # Called by the walk-trigger dispatcher when a player crosses
-    # a linedef. Returns true if the special was consumed.
+    # a linedef. Returns :w1 (caller clears), :wr (repeatable), or
+    # true for the original repeatable type 88; nil when unrecognized.
     def handle_cross(linedef)
       case linedef.special_type
+      when 10
+        activate_tag(linedef.sector_tag)
+        :w1
+      when 87
+        activate_perpetual(linedef.sector_tag)
+        :wr
+      when 89
+        @active.each_value do |p|
+          next unless p.sector.tag == linedef.sector_tag && p.state != :stopped
+          p.old_state, p.state = p.state, :stopped
+        end
+        :wr
       when WR_LIFT
         activate_tag(linedef.sector_tag)
         true
@@ -49,7 +63,7 @@ module Rubydoom
       @active.each_value do |p|
         case p.state
         when :down
-          p.sector.floor_height -= PLAT_SPEED_TIC
+          p.sector.floor_height -= p.perpetual ? 1 : PLAT_SPEED_TIC
           if p.sector.floor_height <= p.low
             p.sector.floor_height = p.low
             p.state = :waiting
@@ -59,14 +73,15 @@ module Rubydoom
         when :waiting
           p.timer -= 1
           if p.timer <= 0
-            p.state = :up
+            p.state = p.sector.floor_height == p.low ? :up : :down
             play_sector_sound(p.sector, :pstart)
           end
         when :up
-          p.sector.floor_height += PLAT_SPEED_TIC
+          p.sector.floor_height += p.perpetual ? 1 : PLAT_SPEED_TIC
           if p.sector.floor_height >= p.high
             p.sector.floor_height = p.high
-            p.state = :done
+            p.state = p.perpetual ? :waiting : :done
+            p.timer = PLAT_WAIT_TICS if p.perpetual
             play_sector_sound(p.sector, :pstop)
           end
         end
@@ -95,6 +110,29 @@ module Rubydoom
         high = s.floor_height
         next if low >= high
         @active[s.object_id] = Plat.new(s, high, low, :down, 0)
+        play_sector_sound(s, :pstart)
+        fired = true
+      end
+      fired
+    end
+
+    def activate_perpetual(tag)
+      fired = false
+      @map.sectors.each do |s|
+        next unless s.tag == tag
+        if (existing = @active[s.object_id])
+          if existing.state == :stopped && existing.perpetual
+            existing.state = existing.old_state
+            fired = true
+          end
+          next
+        end
+        build_neighbors_cache unless @neighbors_cache
+        heights = (@neighbors_cache[s.object_id] || []).map(&:floor_height) << s.floor_height
+        low, high = heights.minmax
+        next if low == high
+        state = @rng.rand(256).even? ? :up : :down
+        @active[s.object_id] = Plat.new(s, high, low, state, 0, true)
         play_sector_sound(s, :pstart)
         fired = true
       end

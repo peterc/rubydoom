@@ -109,8 +109,9 @@ module Rubydoom
       @clipper    = Clipper.new(@map, @bsp)
       @clipper.on_cross = method(:handle_walk_cross)
       @doors      = Doors.new(@map)
-      @plats      = Plats.new(@map)
-      @floors     = Floors.new(@map)
+      @plats      = Plats.new(@map, rng: @rng)
+      @floors     = Floors.new(@map, textures: @textures)
+      @floors.crush_handler = method(:crush_floor_occupants)
       @donuts     = Donuts.new(@map)
       @stairs     = Stairs.new(@map)
       @teleports  = Teleports.new(@map, @clipper)
@@ -120,11 +121,12 @@ module Rubydoom
       @switches.plats  = @plats
       @switches.floors = @floors
       @switches.donuts = @donuts
+      @switches.stairs = @stairs
       @switches.sound  = @sound
       @plats.sound = @sound
       @scrollers  = WallScrollers.new(@map)
       @sector_lights  = SectorLights.new(@map, rng: @rng)
-      @sector_effects = SectorEffects.new(@clipper)
+      @sector_effects = SectorEffects.new(@clipper, rng: @rng)
       @sector_effects.switches = @switches
       @pickups        = Pickups.new(@map)
       @pickups.sound  = @sound
@@ -269,10 +271,24 @@ module Rubydoom
     W1_EXIT_NORMAL   = 52
     W1_EXIT_SECRET   = 124
 
+    # Uses the engine's existing floor-bound actor height model.
+    def crush_floor_occupants(sector)
+      gap = sector.ceiling_height - sector.floor_height
+      if gap < 56 && @clipper.sector_at(@player.x, @player.y).equal?(sector)
+        @player.take_damage(10)
+      end
+      @combat.shootables.each do |thing, _radius, height|
+        next unless gap < height
+        next unless @clipper.sector_at(thing.x, thing.y).equal?(sector)
+        @combat.damage(@combat.mobj_for(thing), 10)
+      end
+    end
+
     def handle_walk_cross(ld, side = 0)
       fired =
-        if @plats.handle_cross(ld)
-          true  # WR — leave special intact.
+        if (plat_result = @plats.handle_cross(ld))
+          ld.special_type = 0 if plat_result == :w1
+          true
         elsif (floor_result = @floors.handle_cross(ld))
           ld.special_type = 0 if floor_result == :w1
           true

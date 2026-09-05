@@ -24,6 +24,7 @@ module Rubydoom
     SECRET        = 9
     END_LEVEL     = 11
     SUPER_DAMAGE  = 16
+    DAMAGE_STROBE = 4
 
     DAMAGE_PERIOD_TICS  = 32
     SLIME_AMOUNT        = 10
@@ -31,8 +32,9 @@ module Rubydoom
     END_LEVEL_AMOUNT    = 20
     END_LEVEL_THRESHOLD = 10
 
-    def initialize(clipper)
+    def initialize(clipper, rng: Random.new)
       @clipper  = clipper
+      @rng = rng
       @leveltime = 0
       @switches  = nil
     end
@@ -51,6 +53,11 @@ module Rubydoom
       return unless sec
 
       case sec.special_type
+      when DAMAGE_STROBE
+        # Heavy damage floors occasionally leak through radiation suits.
+        unless player.has_power?(:radsuit) && @rng.rand(256) >= 5
+          player.take_damage(20) if (@leveltime & 31).zero?
+        end
       when SLIME_DAMAGE
         damage_floor(player, SLIME_AMOUNT)
       when NUKAGE_DAMAGE

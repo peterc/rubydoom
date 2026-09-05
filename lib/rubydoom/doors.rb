@@ -92,6 +92,10 @@ module Rubydoom
     #   * type 90 — WR Door Open Stay (remote by tag, repeatable)
     def handle_cross(linedef)
       case linedef.special_type
+      when 3
+        close_tagged(linedef.sector_tag) ? :w1 : nil
+      when 75
+        close_tagged(linedef.sector_tag) ? :wr : nil
       when 2  # W1 Door Open Stay
         open_tagged(linedef.sector_tag, kind: :d1) ? :w1 : nil
       when 16 # W1 Door Close 30 Sec
@@ -103,12 +107,16 @@ module Rubydoom
       end
     end
 
+    # Close tagged doors permanently (walk and repeatable switch variants).
+    def close_tagged(tag)
+      close30_tagged(tag, kind: :close)
+    end
+
     # Vanilla `close30ThenOpen`. The tagged door is currently open;
     # this lowers its ceiling to the floor (close), waits 30 seconds,
-    # then raises it back up. The reopened ceiling sits at the lowest
-    # neighbour ceiling − DOOR_GAP (same final height vanilla uses).
+    # then raises it back to its height at activation.
     # Returns true iff at least one sector started the close.
-    def close30_tagged(tag)
+    def close30_tagged(tag, kind: :close30)
       fired = false
       @map.sectors.each do |sector|
         next unless sector.tag == tag
@@ -118,7 +126,7 @@ module Rubydoom
         # from the neighbours (vanilla does the same — `topheight`
         # is captured at trigger time).
         @active[sector.object_id] =
-          Door.new(sector, sector.ceiling_height, :closing, 0, :close30)
+          Door.new(sector, sector.ceiling_height, :closing, 0, kind)
         play_door_sound(sector, :dorcls)
         fired = true
       end

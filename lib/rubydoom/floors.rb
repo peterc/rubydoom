@@ -51,16 +51,29 @@ module Rubydoom
     SR_LOWER_FAST            = 70
     WR_LOWER_TO_LOWEST       = 82
 
-    Mover = Struct.new(:sector, :dest, :speed, :direction, :done)
+    Mover = Struct.new(:sector, :dest, :speed, :direction, :done,
+                       :texture, :special, :crush)
+    attr_writer :crush_handler
 
-    def initialize(map)
+    def initialize(map, textures: nil)
       @map     = map
+      @textures = textures
+      @tics = 0
       @active  = {}
       @neighbors_cache = nil
     end
 
     def handle_cross(linedef)
       case linedef.special_type
+      when 19
+        activate_lower_to_highest(linedef.sector_tag)
+        :w1
+      when 38
+        activate_lower_to_lowest(linedef.sector_tag)
+        :w1
+      when 30, 37, 56, 58, 59
+        activate_special(linedef)
+        :w1
       when W1_LOWER_FAST, W1_LOWER_FAST_NOLIP
         activate_lower_fast(linedef.sector_tag)
         :w1
@@ -84,6 +97,8 @@ module Rubydoom
     # swap the SW1/SW2 texture).
     def handle_use(linedef)
       case linedef.special_type
+      when 14
+        activate_special(linedef)
       when S1_RAISE_NEXT_CHGTX, S1_RAISE_TO_NEXT
         activate_raise_to_next(linedef.sector_tag)
       when S1_LOWER_TO_LOWEST
@@ -97,7 +112,12 @@ module Rubydoom
       end
     end
 
+    def handle_shoot(linedef)
+      linedef.special_type == 24 && activate_raise_to_low_ceiling(linedef.sector_tag)
+    end
+
     def update_tic
+      @tics += 1
       return if @active.empty?
       @active.each_value do |m|
         if m.direction == :up
@@ -113,11 +133,63 @@ module Rubydoom
             m.done = true
           end
         end
+        @crush_handler&.call(m.sector) if m.crush && (@tics & 3).zero?
+        if m.done && m.texture
+          m.sector.floor_texture = m.texture
+          m.sector.special_type = m.special
+        end
       end
       @active.reject! { |_, m| m.done }
     end
 
     private
+
+    def activate_special(line)
+      fired = false
+      @map.sectors.each do |s|
+        next unless s.tag == line.sector_tag
+        next if @active[s.object_id]
+        texture = special = nil
+        direction = :up
+        speed = FLOOR_SPEED_NORMAL
+        crush = false
+        case line.special_type
+        when 37 # Lower, then adopt the destination neighbor's properties.
+          dest = [lowest_neighbor_floor(s) || s.floor_height, s.floor_height].min
+          donor = (neighbors_of(s) || []).find { |n| n.floor_height == dest }
+          texture = donor ? donor.floor_texture : s.floor_texture
+          special = donor ? donor.special_type : s.special_type
+          direction = :down
+        when 30 # Raise by shortest lower texture on either bordering side.
+          heights = []
+          @map.linedefs.each do |ld|
+            next unless ld.two_sided?
+            next unless @map.linedef_front_sector(ld).equal?(s) || @map.linedef_back_sector(ld).equal?(s)
+            [ld.front_sidedef_index, ld.back_sidedef_index].each do |idx|
+              tex = @textures && @textures[@map.sidedefs[idx].lower_texture]
+              heights << tex.height if tex
+            end
+          end
+          next if heights.empty?
+          dest = s.floor_height + heights.min
+        when 56
+          dest = [lowest_neighbor_ceiling(s), s.ceiling_height].min - 8
+          crush = true
+          next if dest <= s.floor_height
+        when 14, 58, 59
+          dest = s.floor_height + (line.special_type == 14 ? 32 : 24)
+          speed = 0.5 if line.special_type == 14 # raiseAndChange platform
+          if line.special_type != 58
+            donor = @map.linedef_front_sector(line)
+            s.floor_texture = donor.floor_texture if donor
+            s.special_type = donor.special_type if donor && line.special_type == 59
+          end
+        end
+        @active[s.object_id] = Mover.new(s, dest, speed, direction, false, texture, special, crush)
+        fired = true
+      end
+      fired
+    end
 
     def activate_lower_fast(tag)
       fired = false

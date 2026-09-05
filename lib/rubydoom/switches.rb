@@ -42,6 +42,10 @@ module Rubydoom
     SR_FLOOR_LOWER_FAST  = 70
     S1_DONUT             = 9
     GR_DOOR_OPEN_STAY    = 46
+    S1_STAIRS_BUILD      = 7
+    S1_LIFT             = 21
+    S1_RAISE_32_CHANGE   = 14
+    G1_RAISE_FLOOR       = 24
 
     # Vanilla BUTTONTIME: the depressed (SW2) texture of a repeatable
     # switch springs back to SW1 after one second. Once-only switches
@@ -56,6 +60,7 @@ module Rubydoom
       S1_EXIT_LEVEL, S1_EXIT_SECRET, S1_DOOR_OPEN_STAY, S1_DOOR_OPEN_CLOSE,
       S1_FLOOR_RAISE_NEXT, S1_FLOOR_RAISE_NEXT_PLAIN, S1_FLOOR_LOWER_LOWEST,
       S1_FLOOR_LOWER_HIGHEST, S1_DONUT,
+      S1_STAIRS_BUILD, S1_LIFT, S1_RAISE_32_CHANGE, G1_RAISE_FLOOR,
     ].freeze
 
     attr_reader :exit_requested, :secret_exit_requested
@@ -100,7 +105,7 @@ module Rubydoom
     # Late-bound to avoid initialization-order dependencies in Game#load_map.
     # `sound`/`listener` let the click play attenuated at the switch
     # position; without them we fall back to silent.
-    attr_writer :doors, :plats, :floors, :donuts, :sound, :listener
+    attr_writer :doors, :plats, :floors, :donuts, :stairs, :sound, :listener
 
     def try_use(player)
       rad = player.angle * Math::PI / 180.0
@@ -109,6 +114,16 @@ module Rubydoom
       hits.each do |_t, ld|
         fired =
           case ld.special_type
+          when S1_STAIRS_BUILD
+            @stairs&.build(ld.sector_tag)
+          when S1_LIFT
+            @plats&.activate_tag(ld.sector_tag)
+          when S1_RAISE_32_CHANGE
+            @floors&.handle_use(ld)
+          when 42 # SR close door
+            @doors&.close_tagged(ld.sector_tag)
+          when 61 # SR open and stay
+            @doors&.open_tagged(ld.sector_tag, kind: :d1)
           when S1_EXIT_LEVEL
             @exit_requested = true
             true
@@ -155,6 +170,8 @@ module Rubydoom
     def try_shoot(ld)
       fired =
         case ld.special_type
+        when G1_RAISE_FLOOR
+          @floors&.handle_shoot(ld)
         when GR_DOOR_OPEN_STAY
           @doors&.open_tagged(ld.sector_tag, kind: :d1)
         end
