@@ -47,6 +47,12 @@ module Rubydoom
       @shaded[(row << 8) | idx]
     end
 
+    # Rasterizers select lighting once per column or span, then index
+    # this row directly for every pixel.
+    def shaded_row(row)
+      @shaded_rows[row]
+    end
+
     # Convenience: pick a colormap row given the sector light, the
     # contrast adjustment for this seg / surface, and the scale derived
     # from view-space depth z.
@@ -74,6 +80,7 @@ module Rubydoom
           @shaded[base + idx] = colors[@bytes.getbyte(base + idx)]
         end
       end
+      @shaded_rows = @shaded.each_slice(ROW_SIZE).map(&:freeze).freeze
     end
   end
 end

@@ -822,7 +822,7 @@ module Rubydoom
 
       # Z is constant across this wall column, so the colormap row is
       # too — pick it once.
-      row = @colormap.row_for(light, contrast, z)
+      colors = @colormap.shaded_row(@colormap.row_for(light, contrast, z))
 
       # Direct framebuffer write: hoist rgba string and per-row offset
       # increment out of the inner loop. set_pixel was a measurable
@@ -835,7 +835,7 @@ module Rubydoom
       while sy <= sy_bottom
         idx = col_data[v.floor % tex_h]
         if idx && idx >= 0
-          rgb = @colormap.shaded(row, idx)
+          rgb = colors[idx]
           rgba.setbyte(offset,     rgb[0])
           rgba.setbyte(offset + 1, rgb[1])
           rgba.setbyte(offset + 2, rgb[2])
@@ -963,7 +963,7 @@ module Rubydoom
         # Z is constant across this whole row, so the colormap row is
         # too. Visplanes don't get fake contrast — that's a wall-only
         # trick.
-        row_idx = @colormap.row_for(light, 0, z)
+        colors = @colormap.shaded_row(@colormap.row_for(light, 0, z))
 
         sy_stride = sy * stride
         i = 0
@@ -980,7 +980,7 @@ module Rubydoom
           sxi    = run_start
           while sxi <= run_end
             idx = pixels.getbyte(((world_y.floor & 63) << 6) | (world_x.floor & 63))
-            rgb = @colormap.shaded(row_idx, idx)
+            rgb = colors[idx]
             rgba.setbyte(offset,     rgb[0])
             rgba.setbyte(offset + 1, rgb[1])
             rgba.setbyte(offset + 2, rgb[2])

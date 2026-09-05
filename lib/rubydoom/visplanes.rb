@@ -21,12 +21,10 @@ module Rubydoom
         list = columns[sx] ||= []
         # Merge with an existing range if the new span is overlapping or
         # immediately adjacent. Otherwise append as a separate range.
-        list.each_with_index do |range, i|
+        list.each do |range|
           if top <= range[1] + 1 && bot >= range[0] - 1
-            list[i] = [
-              range[0] < top ? range[0] : top,
-              range[1] > bot ? range[1] : bot,
-            ]
+            range[0] = top if top < range[0]
+            range[1] = bot if bot > range[1]
             return
           end
         end
@@ -37,13 +35,20 @@ module Rubydoom
     def initialize(width)
       @width   = width
       @planes  = []
-      @by_key  = {}
+      @by_flat = {}.compare_by_identity
     end
 
     def add_span(flat, height, light, is_ceiling, sx, top, bot)
       return if flat.nil? || top > bot
-      key = [flat.object_id, height, light, is_ceiling]
-      plane = @by_key[key] ||= begin
+      # These lookups happen for every visible column. Nested tables
+      # avoid allocating a composite key for each span. They live for
+      # one frame, so moving heights and changing lights cannot leave
+      # a growing cache behind.
+      by_height = @by_flat[flat] ||= {}
+      by_light = by_height[height] ||= {}
+      sides = by_light[light] ||= [nil, nil]
+      side = is_ceiling ? 1 : 0
+      plane = sides[side] ||= begin
         p = Plane.new(flat, height, light, is_ceiling, Array.new(@width))
         @planes << p
         p

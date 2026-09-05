@@ -23,6 +23,7 @@ module Rubydoom
       # one costs ~163KB of pack/`*` allocation; reusing it costs zero
       # and turns clear() into an in-place String#replace.
       @clear_templates = {}
+      @solid_runs = {}
     end
 
     # In-place clear. The previous `clear` allocated a fresh w*h*4 byte
@@ -91,8 +92,24 @@ module Rubydoom
       y_end = [y + h - 1, @height - 1].min
       x = 0 if x < 0
       y = 0 if y < 0
-      (x..x_end).each do |xi|
-        fill_vertical_line(xi, y, y_end, r, g, b, a)
+      return if x > x_end || y > y_end
+
+      # Full-width rectangles are contiguous: fill the background in one
+      # copy. Partial-width rectangles need one copy per row. In
+      # particular, repeated String slice assignments for the background
+      # proved expensive on TruffleRuby even with cached source strings.
+      width = x_end - x + 1
+      rows_per_copy = width == @width ? y_end - y + 1 : 1
+      pixels = width * rows_per_copy
+      run = @solid_runs[[pixels, r, g, b, a]] ||=
+        ([r, g, b, a].pack("C4") * pixels).freeze
+      length = run.bytesize
+      stride = @width * BYTES_PER_PIXEL
+      offset = y * stride + x * BYTES_PER_PIXEL
+      while y <= y_end
+        @rgba[offset, length] = run
+        offset += stride * rows_per_copy
+        y += rows_per_copy
       end
     end
 

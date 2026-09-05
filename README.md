@@ -106,6 +106,13 @@ Sample output:
     benchmark. Enables YJIT (unless `RUBYDOOM_DISABLE_YJIT` is set)
     and runs the demo through `Rubydoom::HeadlessRunner`.
 
+  * `scripts/measure_demo.rb [--yjit] path/to/demo.rdm [wad]` — one
+    warmup replay followed by five measured replays, with JSON samples
+    and median/range statistics. `--verify` runs a separate all-frame
+    checksum pass; `--lib PATH` selects a baseline library directory.
+    See [performance measurements](docs/performance.md) for methodology
+    and before/after results.
+
   * `scripts/profile_game.rb [seconds]` — wraps `bin/rubydoom` in
     `StackProf.run` for the given duration, then exits. Output goes
     to `tmp/rubydoom-stackprof.dump`. Inspect with:
