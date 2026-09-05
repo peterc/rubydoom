@@ -60,11 +60,18 @@ and dispatches by special_type. Wired today:
   * 62  — SR Lift Lower-Wait-Raise (remote by tag) — delegates to
           `Plats.activate_tag(tag)`. Repeatable: special_type isn't
           cleared, only S1* specials are.
-  * 20  — S1 Floor Raise To Next Higher (Change Tex & Type) —
-          delegates to `Floors.handle_use(ld)`.
+  * 20  — S1 Floor Raise To Next Higher — delegates to
+          `Floors.handle_use(ld)`; texture/type transfer is not yet
+          implemented for this action (nor for walk-trigger 22).
   * 9   — S1 Donut (remote by tag) — delegates to
           `Donuts.handle_use(ld)`. Pillar lowers, surrounding ring
           raises with the model sector's floor texture + special.
+
+Additional use actions include 7 (stairs), 14 (raise 32 + texture),
+18/23/102/70 (floors), 21 (lift), 29/42/61/63 (doors), and 51
+(secret exit). See docs/specials.md for the recent coverage pass.
+Walk-door 86 opens and stays open; 90 opens, waits, then closes.
+Walk-floor 91 (raise) and 98 (fast lower) remain repeatable.
 
 Gun-trigger specials (G*) come in through `Switches.try_shoot(ld)`
 instead. `Weapons` calls a `wall_hit_handler` (wired by Game) when
@@ -74,6 +81,7 @@ Game routes that to `Switches.try_shoot`. Wired today:
   * 46  — GR Door Open Stay (remote by tag, repeatable). Delegates
           to `Doors.open_tagged(tag, kind: :d1)`. GR leaves the
           linedef's special intact.
+  * 24  — G1 Floor Raise To Low Ceiling. Consumed after activation.
 
 On activation the front sidedef's switch texture is swapped
 (SW1xxx ↔ SW2xxx) for the visual click. Switch types in ONCE_ONLY
@@ -103,6 +111,11 @@ All E1M1 and E1M2 sector special_types are wired:
     Damage every 32 tics while the player stands on the floor; secret
     increments `player.secrets_found` once and clears the special.
 
+Also wired: 4 (fast strobe + 20 damage), 5 (10 damage), 11 (20
+damage + low-health exit), 16 (20 damage), and 17 (fire flicker).
+Types 4/16 share occasional radiation-suit leakage; 5/7 grant full
+suit protection. Damage uses a 32-tic cadence.
+
 
 Pickup logic
 ------------
@@ -117,7 +130,10 @@ them.
 
 Done: stimpack, medikit, soulsphere, health bonus, green/blue armor,
 armor bonus, clip, shell pack, bullet box, shell box, rocket box,
-backpack.
+backpack, cells/cell packs, all card/skull keys, shotgun / chaingun /
+rocket launcher / plasma / chainsaw / BFG pickups, and radiation suit /
+invisibility / berserk / invulnerability.
+Computer map and light visor pickups remain unimplemented.
 
 
 Weapon firing and combat
@@ -154,8 +170,9 @@ Shootable mobjs (Combat module)
 -------------------------------
 
 `lib/rubydoom/combat.rb` manages per-thing combat state — health,
-death animation, splash damage. Two kinds today: exploding barrel
-(2035, MT_BARREL) and monsters (POSS/SPOS/TROO/SARG).
+death animation, splash damage. It handles exploding barrels
+(2035, MT_BARREL) and monsters, including POSS/SPOS/TROO/SARG,
+Barons, lost souls, and cacodemons.
 
 Barrels:
   * 20 spawn health, dies after a single shotgun blast or ~2
@@ -268,8 +285,9 @@ sound against doom1.wad — gameplay path still runs.
 Monster projectiles
 -------------------
 
-`lib/rubydoom/projectiles.rb` runs in-flight missiles. Currently only
-the imp fireball (vanilla MT_TROOPSHOT) is wired:
+`lib/rubydoom/projectiles.rb` runs in-flight missiles: imp fireballs,
+Baron and cacodemon projectiles, player rockets, plasma bolts, and
+BFG balls/spray. The imp-fireball path illustrates the architecture:
 
   * A_TroopAttack picks melee vs. missile by approx_dist; in missile
     range it calls Projectiles.spawn_imp_fireball, which computes the
@@ -292,8 +310,7 @@ the imp fireball (vanilla MT_TROOPSHOT) is wired:
     apply damage and explode.
   * Damage routes: Combat#damage for monster hits (so pain/death runs
     normally), Player#take_damage for the player. Owner exclusion
-    means the player can't get hit by their own missiles either, once
-    we add the RL/plasma later.
+    prevents direct self-hits; rocket splash can still hurt the player.
   * Sounds: dsfirsht plays on launch (listener = target), dsfirxpl on
     detonation (source = projectile so the channel-per-source rule
     doesn't kill the launch sound mid-flight).
@@ -385,8 +402,9 @@ math `(count + 7) >> 3` maps a raw count to the 1..8 (red) / 1..4
 (bonus) intensity level. Both counters are transient — not carried
 across map transitions, reset by `Player#reset_to_start!`.
 
-Not yet wired: green tint for the radiation-suit powerup
-(palette 13). Powerups as a whole are still TODO.
+Radiation suits add a green overlay and invulnerability adds a white
+wash, both with expiry blinking. These are approximations, not exact
+palette swaps. Berserk and invisibility gameplay effects are wired too.
 
 
 HUD face state machine
@@ -422,9 +440,11 @@ Not yet wired (need extra plumbing):
 Exit transition
 ---------------
 
-Hitting the exit switch jumps straight to the next map in WAD
-lump order via `Map.next_in_wad` (no intermission screen). For
-shareware doom1.wad this matches vanilla traversal through E1M8;
+Normal exits jump to the next map in WAD lump order via
+`Map.next_in_wad` with a screen-melt wipe but no intermission. Secret
+exits (51 by switch, 124 by walking) instead request the episode's M9
+via App#pick_next_map, when that map exists. Normal WAD-order routing
+for shareware doom1.wad follows the main progression through E1M8;
 after E1M8 it lands on E1M9 (the secret level) because that's
 directory order, whereas vanilla ends the episode at E1M8 and
 routes E1M9 only from E1M3's secret exit.
@@ -563,5 +583,6 @@ records (axis bytes + look_dx s16 + edge codes). Adding a new edge
 appends to EDGE_CODES so older demos still replay.
 
 Wrapper script: `scripts/benchmark_demo.rb demo.rdm` enables YJIT
-(unless RUBYDOOM_DISABLE_YJIT is set) and invokes App with the
-right env vars.
+(unless RUBYDOOM_DISABLE_YJIT is set) and invokes HeadlessRunner
+directly. `scripts/measure_demo.rb --verify demo.rdm` additionally
+hashes every rendered frame for regression comparisons.

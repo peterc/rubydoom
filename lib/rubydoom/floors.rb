@@ -7,18 +7,18 @@ module Rubydoom
   # switches; the dispatcher above us decides whether the linedef's
   # special_type should be cleared based on once-only vs repeatable):
   #
-  #   * type 36 / 98 — W1 turboLower. Drops to the highest surrounding
+  #   * type 36 / 98 — W1 / WR turboLower. Drops to the highest surrounding
   #     floor plus 8 mu of "lip" so the step is visible. 4 mu/tic.
   #     36 is E1M1's demon-trap drop; 98 appears on E1M5.
   #   * type 70    — SR turboLower. Switch-triggered repeatable
   #     variant of 36/98. Same physics.
-  #   * type 5 / 91 — W1 raiseFloor. Rises to (lowest neighbouring
+  #   * type 5 / 91 — W1 / WR raiseFloor. Rises to (lowest neighbouring
   #     ceiling − 8). Slow. Common "barrier raises" trick.
   #   * type 20 / 22 — S1 / W1 raiseFloorToNearest+ChangeTex. Raises
   #     to the lowest neighbouring floor strictly higher than itself.
   #     1 mu/tic. Vanilla also transfers floor flat + sector special
   #     from the donor sector; cosmetic TODO.
-  #   * type 18 / 86 — S1 / WR raiseFloorToNearest. Same destination
+  #   * type 18 — S1 raiseFloorToNearest. Same destination
   #     as 20/22 but no texture transfer (already a no-op for us).
   #
   # Returns `:w1` / `:wr` from `handle_cross` so the walk-cross
@@ -37,11 +37,10 @@ module Rubydoom
 
     # Walk-trigger linedef specials, grouped by once-only vs repeatable.
     W1_LOWER_FAST            = 36
-    W1_LOWER_FAST_NOLIP      = 98   # vanilla also calls turboLower
+    WR_LOWER_FAST           = 98
     W1_RAISE_TO_LOW_CEIL_A   = 5
-    W1_RAISE_TO_LOW_CEIL_B   = 91
+    WR_RAISE_TO_LOW_CEIL     = 91
     W1_RAISE_TO_NEXT_CHGTX   = 22
-    WR_RAISE_TO_NEXT         = 86
 
     # Switch (use) linedef specials.
     S1_RAISE_NEXT_CHGTX      = 20
@@ -74,17 +73,20 @@ module Rubydoom
       when 30, 37, 56, 58, 59
         activate_special(linedef)
         :w1
-      when W1_LOWER_FAST, W1_LOWER_FAST_NOLIP
+      when W1_LOWER_FAST
         activate_lower_fast(linedef.sector_tag)
         :w1
-      when W1_RAISE_TO_LOW_CEIL_A, W1_RAISE_TO_LOW_CEIL_B
+      when W1_RAISE_TO_LOW_CEIL_A
         activate_raise_to_low_ceiling(linedef.sector_tag)
         :w1
       when W1_RAISE_TO_NEXT_CHGTX
         activate_raise_to_next(linedef.sector_tag)
         :w1
-      when WR_RAISE_TO_NEXT
-        activate_raise_to_next(linedef.sector_tag)
+      when WR_LOWER_FAST
+        activate_lower_fast(linedef.sector_tag)
+        :wr
+      when WR_RAISE_TO_LOW_CEIL
+        activate_raise_to_low_ceiling(linedef.sector_tag)
         :wr
       when WR_LOWER_TO_LOWEST
         activate_lower_to_lowest(linedef.sector_tag)

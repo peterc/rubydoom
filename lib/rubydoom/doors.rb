@@ -89,7 +89,8 @@ module Rubydoom
     #   * type  2 — W1 Door Open Stay (remote by tag)
     #   * type 16 — W1 Door Close 30 Sec (close, wait 30 sec, reopen)
     #   * type 76 — WR Door Close 30 Sec
-    #   * type 90 — WR Door Open Stay (remote by tag, repeatable)
+    #   * type 86 — WR Door Open Stay (remote by tag, repeatable)
+    #   * type 90 — WR Door Open Wait Close
     def handle_cross(linedef)
       case linedef.special_type
       when 3
@@ -102,8 +103,10 @@ module Rubydoom
         close30_tagged(linedef.sector_tag) ? :w1 : nil
       when 76 # WR Door Close 30 Sec
         close30_tagged(linedef.sector_tag) ? :wr : nil
-      when 90 # WR Door Open Stay
+      when 86 # WR Door Open Stay
         open_tagged(linedef.sector_tag, kind: :d1) ? :wr : nil
+      when 90 # WR Door Open Wait Close
+        open_tagged(linedef.sector_tag, kind: :dr) ? :wr : nil
       end
     end
 

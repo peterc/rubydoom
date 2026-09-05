@@ -283,4 +283,75 @@ class AdditionalSpecialsTest < Minitest::Test
       assert_equal(roll == 0 ? 80 : 100, @player.health)
     end
   end
+
+  def test_repeatable_door_destinations_and_reactivation
+    [86, 90].each do |type|
+      @target.ceiling_height = @target.floor_height
+      @line.special_type = type
+      assert_nil @floors.handle_cross(@line)
+      assert_equal :wr, @doors.handle_cross(@line)
+      30.times { @doors.update_tic }
+      assert_equal 124, @target.ceiling_height
+      149.times { @doors.update_tic }
+      assert_equal 124, @target.ceiling_height
+      31.times { @doors.update_tic }
+      assert_equal(type == 86 ? 124 : 64, @target.ceiling_height)
+      assert_equal type, @line.special_type
+      assert_equal :wr, @doors.handle_cross(@line)
+      500.times { @doors.update_tic }
+    end
+  end
+
+  def test_repeatable_floors_can_activate_again_after_completion
+    {91 => [64, 128], 98 => [64, 24]}.each do |type, (start, destination)|
+      @line.special_type = type
+      2.times do
+        @target.floor_height = start
+        assert_equal :wr, @floors.handle_cross(@line)
+        100.times { @floors.update_tic }
+        assert_equal destination, @target.floor_height
+        assert_equal type, @line.special_type
+      end
+    end
+  end
+
+  def test_game_keeps_repeatable_floor_triggers
+    game = fresh_game(map: "E1M4")
+    line = game.map.linedefs.find { |ld| ld.special_type == 5 }.dup
+    [91, 98].each do |type|
+      line.special_type = type
+      game.send(:handle_walk_cross, line)
+      assert_equal type, line.special_type
+    end
+  end
+
+  def test_sector16_suit_leak_boundary_and_damage_cadence
+    @target.special_type = 16
+    sector = @target
+    clipper = Object.new
+    clipper.define_singleton_method(:sector_at) { |*| sector }
+    [4, 5].each do |roll|
+      @player.health = 100
+      @player.powers[:radsuit] = 1000
+      rng = Object.new
+      rng.define_singleton_method(:rand) { |limit| raise unless limit == 256; roll }
+      effects = Rubydoom::SectorEffects.new(clipper, rng: rng)
+      31.times { effects.update_tic(@player) }
+      assert_equal 100, @player.health
+      effects.update_tic(@player)
+      assert_equal(roll == 4 ? 80 : 100, @player.health)
+      @player.powers[:radsuit] = 0
+      32.times { effects.update_tic(@player) }
+      assert_equal(roll == 4 ? 60 : 80, @player.health)
+      @player.god_mode = true
+      health = @player.health
+      32.times { effects.update_tic(@player) }
+      assert_equal health, @player.health
+      @player.god_mode = false
+      @player.powers[:invulnerability] = 1000
+      32.times { effects.update_tic(@player) }
+      assert_equal health, @player.health
+      @player.powers[:invulnerability] = 0
+    end
+  end
 end

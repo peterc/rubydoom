@@ -28,6 +28,11 @@ Sector special 4 now combines fast strobing (5 bright / 15 dark tics) with
 Radiation suits usually protect against it, with a seeded 5-in-256 leakage
 roll; god mode and invulnerability still protect the player.
 
+A follow-up correctness pass routes type 86 to open-and-stay doors
+(not floors), gives type 90 its open/wait/close cycle, and preserves
+repeatable floor triggers 91/98. Sector 16 now shares sector 4's
+radiation-suit leakage. Regression tests cover these corrections too.
+
 ## Verification
 
 `bundle exec rake test` includes `test/additional_specials_test.rb`:
@@ -54,8 +59,9 @@ The existing 1,526-tic demo still ends with frame SHA1
   lifts do not share a sector lock or resolve every interaction with actors.
 - Type 14 uses the floor mover, so it does not gain vanilla platform
   obstruction handling. Existing sound behavior is unchanged for floor moves.
-- Existing approximate mappings (including 86, 90, 91, and 98), moving-ceiling
-  actions, additional teleports, and other TODO entries remain separate work.
+- Other incomplete actions (including property transfer for floors 20/22),
+  moving-ceiling actions, additional teleports, and remaining TODO entries
+  are separate work.
 
 Behavior was checked against id Software's original
 [floor/stair actions](https://github.com/id-Software/DOOM/blob/master/linuxdoom-1.10/p_floor.c),

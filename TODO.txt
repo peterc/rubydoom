@@ -9,9 +9,8 @@ Sector specials
 ---------------
 
   * Damage tiers 4 (20% + fast blink), 5 (10%), 7 (5%), 11 (20%
-    + end-of-level on health<=10), and 16 (20%) are done. Type 4
-    includes radiation-suit leakage; type 16 still grants complete
-    suit protection rather than vanilla's occasional leakage.
+    + end-of-level on health<=10), and 16 (20%) are done. Types 4
+    and 16 include radiation-suit leakage.
   * Other light effects: type 17 (fire flicker) is done. Types 2/3
     (fast/slow non-sync strobes), 12/13 (sync siblings), 1 (random
     flash), 8 (glow) are also done.
@@ -28,9 +27,9 @@ on specific special_type integers. To run other E1 maps:
            stay-open, key required, walk/switch trigger). Done:
            types 1/26/27/28, 31/32/33/34 (keyed DR/D1), 2 (W1 Open
            Stay), 16/76 (W1/WR Close-30-Then-Open), 46 (GR Open Stay,
-           gun trigger), 63 (SR Open Close), 90 (WR Open Stay),
+           gun trigger), 63 (SR Open Close), 90 (WR Open Wait Close),
            103 (S1 Open Stay), 3/75 (W1/WR Close), 42 (SR Close),
-           61 (SR Open Stay).
+           61 (SR Open Stay), 86 (WR Open Stay).
   * Lifts: 53, 95, 120, 121, 122, 123 — fast
            variants, raise-and-change, etc. Types 62 (SR) and 88
            (WR), 10 (W1), 21 (S1), 87 (WR perpetual), and 89 (WR
@@ -38,11 +37,11 @@ on specific special_type integers. To run other E1 maps:
   * Floors: 60, 64, 65, 68, 69, 71,
             83, 84, 92, 93, 96, 101, 119, 128, 129, 130, 131,
             132, 140.
-            Done: 5 / 91 (W1 raise to low ceiling), 18 (S1 raise to
+            Done: 5 / 91 (W1/WR raise to low ceiling), 18 (S1 raise to
             next), 20 (S1 raise to next + change — change still TODO),
-            22 (W1 raise to next + change), 23 / 82 (S1/WR lower to
-            lowest), 36 / 98 (W1 lower fast), 70 (SR lower fast),
-            86 (WR raise to next), 102 (S1 lower to highest).
+            22 (W1 raise to next — change still TODO), 23 / 82
+            (S1/WR lower to lowest), 36 / 98 (W1/WR lower fast),
+            70 (SR lower fast), 102 (S1 lower to highest).
             Added: 14 (S1 raise 32 + texture), 19 (W1 lower to
             highest), 24 (G1 raise to low ceiling), 30 (W1 raise by
             shortest lower texture), 37 (W1 lower + change), 38 (W1
@@ -62,9 +61,8 @@ on specific special_type integers. To run other E1 maps:
            52 (W1 normal — done), 124 (W1 secret — done).
 
 See docs/specials.md for this pass's coverage, tests, and limitations.
-Existing mappings also need a fidelity audit: 86 should open a door,
-90 should open/wait/close, and 91/98 should be repeatable. These
-pre-existing behaviors were not changed in this coverage pass.
+The follow-up fidelity pass corrected 86 (open door), 90
+(open/wait/close), and repeatability of 91/98.
 
 A clean way to add coverage: pull the type-number → behavior mapping
 into a table in `lib/rubydoom/linedef_specials.rb` so adding a row is
@@ -181,9 +179,10 @@ Exit transition
   * Intermission screen with par time and kills/items/secrets counts,
     click to advance. (The screen-melt wipe between scenes is wired —
     see Wipe / NOTES.txt.)
-  * Secret-exit type 124 (W1) — only type 51 (S1) is wired into
-    Switches.secret_exit_requested so far. Same routing logic, just
-    needs adding to the walk-trigger dispatcher.
+  * Episode routing: secret exits 51 (S1) and 124 (W1) are wired
+    and App routes them to the episode's M9. Normal exits still
+    follow WAD directory order, so secret-map return destinations
+    and episode endings need proper routing.
 
 
 Sound
@@ -235,8 +234,8 @@ Misc
 ----
 
   * `Plats` / `Floors` / `Doors` each rebuild a sector-neighbors
-    cache; extract into a shared helper on `Map` once a third user
-    appears.
+    cache; extract into a shared helper on `Map` if further work
+    makes the duplication worth removing.
   * `Doors` is unaware of any other moving-floor system, so a door
     that descends into a moving floor won't notice. Not relevant in
     E1M1 but a soundness issue for arbitrary WADs.

@@ -1,7 +1,7 @@
 module Rubydoom
   # Per-tic sector specials that act on the player when the player
   # stands in the sector. Mirrors a subset of P_PlayerInSpecialSector
-  # from linuxdoom-1.10/p_user.c.
+  # from linuxdoom-1.10/p_spec.c.
   #
   # Currently implements:
   #   * type 5  — 10% damage slime. Radsuit negates.
@@ -12,8 +12,8 @@ module Rubydoom
   #   * type 11 — 20% damage + end-of-level on death. The E1M8 brain
   #              floor: god mode is cleared each tic, radsuit is
   #              ignored, and crossing health<=10 fires the exit.
-  #   * type 16 — 20% damage super-nukage / blood. E1M3 has five of
-  #              these. Same 32-tic period as the lighter tier.
+  #   * types 4/16 — 20% damage with occasional radsuit leakage.
+  #              Type 4 also blinks via SectorLights.
   #
   # Vanilla checks `leveltime & 0x1f == 0` so damage tics across all
   # damage sectors fall on the same frame; we keep our own counter
@@ -53,7 +53,7 @@ module Rubydoom
       return unless sec
 
       case sec.special_type
-      when DAMAGE_STROBE
+      when DAMAGE_STROBE, SUPER_DAMAGE
         # Heavy damage floors occasionally leak through radiation suits.
         unless player.has_power?(:radsuit) && @rng.rand(256) >= 5
           player.take_damage(20) if (@leveltime & 31).zero?
@@ -62,8 +62,6 @@ module Rubydoom
         damage_floor(player, SLIME_AMOUNT)
       when NUKAGE_DAMAGE
         damage_floor(player, NUKAGE_AMOUNT)
-      when SUPER_DAMAGE
-        damage_floor(player, END_LEVEL_AMOUNT)
       when END_LEVEL
         damage_end_level(player)
       when SECRET

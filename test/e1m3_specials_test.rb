@@ -21,7 +21,7 @@ class E1M3SpecialsTest < Minitest::Test
                "cleared linedef doesn't fire again"
   end
 
-  def test_wr_door_open_stay_type_90_repeats
+  def test_wr_door_open_wait_close_type_90_repeats
     ld = @game.map.linedefs.find { |l| l.special_type == 90 }
     refute_nil ld, "E1M3 has at least one type-90 walk door"
     assert_equal :wr, @game.doors.handle_cross(ld), "first cross fires"
