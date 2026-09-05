@@ -420,6 +420,10 @@ module Rubydoom
       if @game.switches.secret_exit_requested && cur =~ /\AE(\d)M\d\z/
         secret = "E#{$1}M9"
         return secret if @game.wad.lump(secret)
+      elsif cur == "E1M9" && @game.wad.lump("E1M4")
+        # E1's secret detour rejoins the main route after E1M3.
+        # Keep directory-order fallback for WADs without that map.
+        return "E1M4"
       end
       Map.next_in_wad(@game.wad, cur)
     end

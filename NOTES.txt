@@ -449,6 +449,11 @@ after E1M8 it lands on E1M9 (the secret level) because that's
 directory order, whereas vanilla ends the episode at E1M8 and
 routes E1M9 only from E1M3's secret exit.
 
+E1M9's normal exit is an exception to directory order: it returns
+to E1M4 if present, so the secret detour rejoins the main route.
+If E1M4 is missing, routing falls back to directory order. Other
+episodes' secret-map returns and episode endings are not yet fixed.
+
 Inventory carries across the transition (vanilla single-player
 rule): `Game#carry_inventory_from` copies health, armor, ammo,
 max_ammo (so backpack doubling persists), the backpack flag,

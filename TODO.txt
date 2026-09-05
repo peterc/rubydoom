@@ -180,9 +180,9 @@ Exit transition
     click to advance. (The screen-melt wipe between scenes is wired —
     see Wipe / NOTES.txt.)
   * Episode routing: secret exits 51 (S1) and 124 (W1) are wired
-    and App routes them to the episode's M9. Normal exits still
-    follow WAD directory order, so secret-map return destinations
-    and episode endings need proper routing.
+    and App routes them to the episode's M9. E1M9 now returns to
+    E1M4 when present. Other secret-map returns and episode endings
+    still need proper routing; other normal exits use WAD order.
 
 
 Sound
