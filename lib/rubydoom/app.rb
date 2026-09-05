@@ -84,6 +84,12 @@ module Rubydoom
       # Mute sound effects during demo playback — playback wants a
       # deterministic, side-effect-free run. Live recording keeps audio.
       @sound = @demo_player ? nil : Sound.new(wad)
+      # Music is an optional frontend service, never loaded by the
+      # headless runner. Its own modules have no engine/Gosu dependency.
+      if ENV["RUBYDOOM_MUSIC"] == "1" && !@demo_player && !@dump_frame_to && !ENV["RUBYDOOM_BENCHMARK"]
+        require_relative "music/player"
+        @music = Music::Player.new(wad: wad, song_factory: ->(path) { Gosu::Song.new(path) })
+      end
       # RUBYDOOM_SEED makes the whole sim deterministic — required for
       # the demo-record/playback benchmark to produce stable shasums.
       # Absent: fresh Random (vanilla "different every launch") behavior.
@@ -176,6 +182,12 @@ module Rubydoom
                                    sky: sky, sprites: @game.sprites)
       @automap = Automap.new(@game.map, bsp: @game.bsp)
       @exit_announced = false
+      @music&.play_map(map_name)
+    end
+
+    def close
+      @music&.stop
+      super
     end
 
     def needs_cursor?

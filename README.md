@@ -27,6 +27,53 @@ Default controls: WASD or arrow keys to move, mouse to look (click in the window
 > [!TIP]
 > Pressing "G" while in game enables GOD MODE if you suck like me!! 😂 As well as fixing your health at 100%, it also gives you all the weapons for a fun test. Note that the plasma rifle and BFG are NOT in the 'shareware' WAD, but you do get the rocket launcher at least.
 
+## Optional music
+
+```sh
+RUBYDOOM_MUSIC=1 bin/rubydoom                          # shareware E1M1
+RUBYDOOM_MUSIC=1 bin/rubydoom --map E2M1 wads/doom.wad  # full game
+```
+
+Level music works throughout Episodes 1–3: all nine shareware levels
+and all 27 levels in the original full game, including secret levels.
+Tracks loop automatically and change as you move between maps. Respawning
+on the same map keeps the current music playing.
+
+Music is off by default. This plays the original WAD's note sequences
+through a small **pure-Ruby synthesizer**, with six basic instrument
+families and generated percussion. It has a simple, chiptune-like sound;
+it does not emulate the original Sound Blaster/AdLib hardware. No extra
+gems, external converters, soundfonts, or instrument downloads are needed.
+Gosu handles playback using the same audio dependency as sound effects.
+
+The first visit to a map renders its track to a 22,050 Hz, mono, 16-bit WAV
+in `tmp/music/`. This briefly pauses loading; subsequent visits reuse the
+cache. For reference, E1M1's 96-second track took about 0.9 seconds to
+render on an Apple M5 with CRuby 4.0.2 + YJIT. To pre-render without opening
+a window or loading Gosu:
+
+```sh
+ruby scripts/render_music.rb E1M1
+ruby scripts/render_music.rb --all             # all music in the shareware WAD
+ruby scripts/render_music.rb --all wads/doom.wad
+```
+
+To play without music, omit `RUBYDOOM_MUSIC` or set it to `0`. Cached WAVs
+can be deleted from `tmp/music/`; they will be regenerated when needed.
+
+This initial version looks up MUS tracks named `D_<map name>` (the E1–E3
+convention); custom maps without a matching track continue without music.
+MIDI-format replacements are not supported. It starts the level track at
+launch, including during the brief title screen. Separate title,
+intermission and victory music, plus Doom II/Ultimate DOOM Episode 4
+track routing, are not wired yet. Synthesis is mono, with no reverb,
+chorus or panning.
+
+Music is disabled during demo playback, frame dumps, and headless
+benchmarking, even when `RUBYDOOM_MUSIC=1`. Its modules are loaded only
+when live music is enabled; the simulation and headless runner do not
+depend on them. See [music implementation notes](docs/music.md).
+
 ## Benchmarking
 
 Since the underlying engine of the game is in pure Ruby, it can be run on other implementations like TruffleRuby.
@@ -73,6 +120,12 @@ Sample output:
 | --- | --- |
 | `RUBYDOOM_SKILL` | Skill level 0–4 (0 = ITYTD, 2 = HMP, 4 = Nightmare). Default: 2. Ignored during demo playback (skill comes from the demo header). |
 | `RUBYDOOM_X`, `RUBYDOOM_Y`, `RUBYDOOM_ANGLE` | Debug spawn position. Overrides the map's `player_start` for the initial map only. |
+
+### Music
+
+| Variable | Description |
+| --- | --- |
+| `RUBYDOOM_MUSIC` | Set to `1` to enable optional synthesized music during live play. Off by default; ignored during demo playback, frame dumps, and headless benchmarking. See [Optional music](#optional-music) for caching and pre-rendering. |
 
 ### Demos, determinism, and benchmarking
 
